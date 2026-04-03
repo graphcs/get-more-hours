@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Clock } from "lucide-react";
+import { Logo } from "@/components/logo";
 
 export function Footer() {
   return (
@@ -7,9 +7,8 @@ export function Footer() {
       <div className="container mx-auto px-4">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
           <div>
-            <div className="flex items-center gap-2 mb-4">
-              <Clock className="h-5 w-5 text-primary" />
-              <h3 className="font-semibold text-primary">Get More Hours</h3>
+            <div className="mb-4">
+              <Logo height={22} href="/" />
             </div>
             <p className="text-sm text-muted-foreground">
               Helping NY seniors get the home care hours they deserve.

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { createServiceClient } from "@/lib/supabase/server";
 import { contactSchema } from "@/lib/validations";
 
 export async function POST(req: Request) {
@@ -14,9 +14,18 @@ export async function POST(req: Request) {
       );
     }
 
-    await db.contactSubmission.create({
-      data: parsed.data,
-    });
+    const supabase = await createServiceClient();
+    const { error } = await supabase
+      .from("contact_submissions")
+      .insert(parsed.data);
+
+    if (error) {
+      console.error("Contact submission error:", error);
+      return NextResponse.json(
+        { error: "Something went wrong" },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json(
       { message: "Thank you! We'll be in touch within 24 hours." },
