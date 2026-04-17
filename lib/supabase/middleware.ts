@@ -42,12 +42,11 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith("/admin") ||
     pathname.startsWith("/intake");
 
-  // Prototype mode: skip auth redirect so demo works without real accounts
-  // if (isProtectedRoute && !user) {
-  //   const loginUrl = new URL("/login", request.url);
-  //   loginUrl.searchParams.set("callbackUrl", pathname);
-  //   return NextResponse.redirect(loginUrl);
-  // }
+  if (isProtectedRoute && !user) {
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("callbackUrl", pathname);
+    return NextResponse.redirect(loginUrl);
+  }
 
   // Admin routes - check role
   if (pathname.startsWith("/admin") && user) {

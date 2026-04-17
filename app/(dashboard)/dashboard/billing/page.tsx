@@ -1,16 +1,11 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getRequiredUser } from "@/lib/supabase/server";
 import { STAGE_LABELS, PRICING } from "@/lib/constants";
 import { BillingClient } from "@/components/dashboard/billing-client";
 import type { Case, BillingRecord } from "@/types";
 
 export default async function BillingPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) redirect("/login");
+  const { supabase, user } = await getRequiredUser();
 
   const { data: caseData } = await supabase
     .from("cases")

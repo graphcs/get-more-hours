@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
+import { getRequiredUser } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { StageTracker } from "@/components/dashboard/stage-tracker";
 import { NextSteps } from "@/components/dashboard/next-steps";
@@ -12,14 +12,7 @@ import { FileText, ArrowRight } from "lucide-react";
 import type { Case, Document } from "@/types";
 
 export default async function DashboardPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
+  const { supabase, user } = await getRequiredUser();
 
   const { data: profile } = await supabase
     .from("profiles")

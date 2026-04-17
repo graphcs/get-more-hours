@@ -1,5 +1,5 @@
 import { redirect, notFound } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getRequiredUser } from "@/lib/supabase/server";
 import { STAGE_CONFIG } from "@/lib/stage-config";
 import { StageHeader } from "@/components/dashboard/stage-header";
 import { StageAiDocs } from "@/components/dashboard/stage-ai-docs";
@@ -22,14 +22,7 @@ export default async function StageDetailPage({
     notFound();
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
+  const { supabase, user } = await getRequiredUser();
 
   const { data: caseData } = await supabase
     .from("cases")

@@ -1,15 +1,10 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getRequiredUser } from "@/lib/supabase/server";
 import { DocumentsList } from "@/components/dashboard/documents-list";
 import type { Case, Document } from "@/types";
 
 export default async function DocumentsPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) redirect("/login");
+  const { supabase, user } = await getRequiredUser();
 
   const { data: caseData } = await supabase
     .from("cases")
