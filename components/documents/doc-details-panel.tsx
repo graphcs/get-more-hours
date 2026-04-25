@@ -1,9 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2 } from "lucide-react";
+import { Loader2, RotateCcw } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 import type { Document, DocumentVersion, DocumentComment } from "@/types";
 
 interface DocDetailsPanelProps {
@@ -59,14 +62,132 @@ function DetailsTab({ document }: { document: Document }) {
       )}
 
       <div className="mt-4 grid gap-2">
-        <Button variant="outline" className="w-full">
-          Download PDF
-        </Button>
-        <Button variant="outline" className="w-full">
-          Print
-        </Button>
+        {document.type === "uploaded" ? (
+          <UploadedDownloadButton
+            storagePath={document.storage_path}
+            fileName={document.name}
+          />
+        ) : (
+          <GeneratedLetterActions
+            documentId={document.id}
+            documentName={document.name}
+            disabled={!document.content}
+          />
+        )}
       </div>
     </div>
+  );
+}
+
+function GeneratedLetterActions({
+  documentId,
+  documentName,
+  disabled,
+}: {
+  documentId: string;
+  documentName: string;
+  disabled?: boolean;
+}) {
+  const [downloading, setDownloading] = useState(false);
+
+  async function handleDownload() {
+    setDownloading(true);
+    try {
+      const res = await fetch(`/api/documents/${documentId}/pdf`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Failed to generate PDF");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = window.document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${documentName}.pdf`;
+      window.document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  function handlePrint() {
+    window.open(`/api/documents/${documentId}/pdf?mode=inline`, "_blank");
+  }
+
+  return (
+    <>
+      <Button
+        variant="outline"
+        className="w-full"
+        onClick={handleDownload}
+        disabled={disabled || downloading}
+      >
+        {downloading && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
+        Save as PDF
+      </Button>
+      <Button
+        variant="outline"
+        className="w-full"
+        onClick={handlePrint}
+        disabled={disabled}
+      >
+        Print
+      </Button>
+    </>
+  );
+}
+
+function UploadedDownloadButton({
+  storagePath,
+  fileName,
+}: {
+  storagePath: string | null;
+  fileName: string;
+}) {
+  const [loading, setLoading] = useState(false);
+
+  async function handleDownload() {
+    if (!storagePath) {
+      toast.error("No file attached");
+      return;
+    }
+    setLoading(true);
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase.storage
+        .from("documents")
+        .createSignedUrl(storagePath, 60);
+      if (error || !data?.signedUrl) {
+        throw new Error(error?.message || "Could not create download link");
+      }
+      const anchor = window.document.createElement("a");
+      anchor.href = data.signedUrl;
+      anchor.download = fileName;
+      anchor.rel = "noopener";
+      window.document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Button
+      variant="outline"
+      className="w-full"
+      onClick={handleDownload}
+      disabled={loading}
+    >
+      {loading && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
+      Download
+    </Button>
   );
 }
 
@@ -174,8 +295,10 @@ function CommentsTab({ documentId }: { documentId: string }) {
 }
 
 function HistoryTab({ documentId }: { documentId: string }) {
+  const router = useRouter();
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [loading, setLoading] = useState(true);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch(`/api/documents/${documentId}`)
@@ -186,6 +309,32 @@ function HistoryTab({ documentId }: { documentId: string }) {
       })
       .catch(() => setLoading(false));
   }, [documentId]);
+
+  async function handleRestore(versionId: string, versionNum: number) {
+    setRestoringId(versionId);
+    try {
+      const res = await fetch(
+        `/api/documents/${documentId}/versions/${versionId}/restore`,
+        { method: "POST" }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Restore failed");
+      }
+      toast.success(`Restored v${versionNum}`);
+      // Refresh the server tree so letter body updates.
+      router.refresh();
+      // Re-fetch versions list to show the new restore entry.
+      const fresh = await fetch(`/api/documents/${documentId}`).then((r) =>
+        r.json()
+      );
+      setVersions(fresh.versions || []);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Restore failed");
+    } finally {
+      setRestoringId(null);
+    }
+  }
 
   if (loading) {
     return (
@@ -241,6 +390,22 @@ function HistoryTab({ documentId }: { documentId: string }) {
             <div className="text-xs text-foreground italic leading-snug">
               &ldquo;{v.note}&rdquo;
             </div>
+          )}
+          {i !== 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-1.5 h-6 text-[11px] gap-1"
+              onClick={() => handleRestore(v.id, v.version)}
+              disabled={restoringId !== null}
+            >
+              {restoringId === v.id ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <RotateCcw className="h-3 w-3" />
+              )}
+              Restore
+            </Button>
           )}
         </div>
       ))}

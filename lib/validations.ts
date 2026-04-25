@@ -88,3 +88,7 @@ export const stageUpdateSchema = z
     (d) => d.currentStage !== undefined || d.stageStatus !== undefined,
     { message: "Provide currentStage or stageStatus" }
   );
+
+export const commentSchema = z.object({
+  text: z.string().trim().min(1, "Comment cannot be empty").max(5000),
+});
