@@ -24,3 +24,8 @@ export const contactSchema = z.object({
   phone: z.string().optional(),
   message: z.string().min(10, "Message must be at least 10 characters"),
 });
+
+export const profileUpdateSchema = z.object({
+  name: z.string().trim().min(2, "Name must be at least 2 characters").max(120),
+  phone: z.string().trim().max(40).optional().or(z.literal("")),
+});
