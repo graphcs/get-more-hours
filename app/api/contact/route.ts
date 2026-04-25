@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 import { contactSchema } from "@/lib/validations";
 
 export async function POST(req: Request) {
@@ -14,7 +14,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const supabase = await createServiceClient();
+    const supabase = await createClient();
     const { error } = await supabase
       .from("contact_submissions")
       .insert(parsed.data);

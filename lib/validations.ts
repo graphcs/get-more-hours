@@ -29,3 +29,7 @@ export const profileUpdateSchema = z.object({
   name: z.string().trim().min(2, "Name must be at least 2 characters").max(120),
   phone: z.string().trim().max(40).optional().or(z.literal("")),
 });
+
+export const contactStatusSchema = z.object({
+  status: z.enum(["new", "contacted", "resolved"]),
+});

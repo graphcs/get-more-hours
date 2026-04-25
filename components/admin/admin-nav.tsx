@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/logo";
 import {
   LayoutDashboard,
-  Users,
   CreditCard,
+  Mail,
   Settings,
   LogOut,
 } from "lucide-react";
@@ -22,7 +22,7 @@ interface AdminNavProps {
 
 const navItems = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/clients", label: "All Clients", icon: Users },
+  { href: "/admin/contact-submissions", label: "Inquiries", icon: Mail },
   { href: "/admin/billing", label: "Billing", icon: CreditCard },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
