@@ -1,6 +1,12 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import OpenAI from "openai";
+import {
+  NAME_MAP,
+  STAGE_MAP,
+  runDocumentGeneration,
+  type DocumentType,
+} from "@/lib/document-generation";
 
 const openai = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
@@ -106,7 +112,7 @@ export async function POST(req: Request) {
       .eq("id", documentId);
 
     // Check if this upload should trigger AI generation
-    await checkAndTriggerGeneration(serviceClient, doc, req);
+    await checkAndTriggerGeneration(serviceClient, doc);
 
     return NextResponse.json({
       message: "OCR complete",
@@ -129,26 +135,22 @@ export async function POST(req: Request) {
 
 async function checkAndTriggerGeneration(
   serviceClient: Awaited<ReturnType<typeof createServiceClient>>,
-  doc: Record<string, unknown>,
-  req: Request
+  doc: Record<string, unknown>
 ) {
   const caseId = doc.case_id as string;
   const docName = (doc.name as string).toLowerCase();
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  const cookie = req.headers.get("cookie") || "";
-
-  const triggerGeneration = (documentType: string) =>
-    fetch(`${baseUrl}/api/ai/generate`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: cookie,
-      },
-      body: JSON.stringify({ caseId, documentType }),
-    }).catch((err) =>
-      console.error(`Generation trigger error (${documentType}):`, err)
+  const triggerGeneration = async (documentType: DocumentType) => {
+    const documentId = await ensurePlaceholderDocument(
+      serviceClient,
+      caseId,
+      documentType
     );
+    if (!documentId) return;
+    after(() =>
+      runDocumentGeneration({ caseId, documentType, documentId })
+    );
+  };
 
   // IAD uploaded → generate Stage 2 appeal + advance case
   if (
@@ -188,4 +190,54 @@ async function checkAndTriggerGeneration(
       await triggerGeneration("stage3_memo");
     }
   }
+}
+
+// Returns the id of the placeholder generated document for this (caseId, documentType),
+// inserting one if it doesn't yet exist. Returns null if generation should be skipped
+// (e.g. the document is already 'ready' — manual retry is the path to regenerate).
+async function ensurePlaceholderDocument(
+  serviceClient: Awaited<ReturnType<typeof createServiceClient>>,
+  caseId: string,
+  documentType: DocumentType
+): Promise<string | null> {
+  const name = NAME_MAP[documentType];
+  const stage = STAGE_MAP[documentType];
+
+  const { data: existing } = await serviceClient
+    .from("documents")
+    .select("id, generation_status")
+    .eq("case_id", caseId)
+    .eq("type", "generated")
+    .eq("name", name)
+    .maybeSingle();
+
+  if (existing) {
+    if (existing.generation_status === "ready") return null;
+    return existing.id as string;
+  }
+
+  const { data: inserted, error: insertError } = await serviceClient
+    .from("documents")
+    .insert({
+      case_id: caseId,
+      name,
+      type: "generated",
+      stage,
+      status: "pending",
+      format: "letter",
+      version: 1,
+      generation_status: "pending",
+    })
+    .select("id")
+    .single();
+
+  if (insertError || !inserted) {
+    console.error(
+      `Failed to create placeholder document for ${documentType}:`,
+      insertError
+    );
+    return null;
+  }
+
+  return inserted.id as string;
 }

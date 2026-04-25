@@ -21,7 +21,7 @@ export type DocumentType =
   | "stage3_hearing"
   | "stage3_memo";
 
-const STAGE_MAP: Record<DocumentType, number> = {
+export const STAGE_MAP: Record<DocumentType, number> = {
   stage1_request: 1,
   stage1_lomn: 1,
   stage2_appeal: 2,
@@ -29,7 +29,7 @@ const STAGE_MAP: Record<DocumentType, number> = {
   stage3_memo: 3,
 };
 
-const NAME_MAP: Record<DocumentType, string> = {
+export const NAME_MAP: Record<DocumentType, string> = {
   stage1_request: "Request for Increase in Plan of Care",
   stage1_lomn: "LOMN Request Template (for your Doctor)",
   stage2_appeal: "Internal Appeal Letter",
