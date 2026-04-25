@@ -30,7 +30,11 @@ export default async function DocumentsPage() {
           All documents for your case
         </p>
       </div>
-      <DocumentsList documents={(documents || []) as Document[]} />
+      <DocumentsList
+        documents={(documents || []) as Document[]}
+        caseId={(caseData as Case).id}
+        currentStage={(caseData as Case).current_stage}
+      />
     </div>
   );
 }

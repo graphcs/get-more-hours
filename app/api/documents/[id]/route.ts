@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { documentUpdateSchema } from "@/lib/validations";
 
 export async function GET(
   _req: Request,
@@ -52,7 +53,14 @@ export async function PUT(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await req.json();
+  const parsed = documentUpdateSchema.safeParse(await req.json());
+
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0].message },
+      { status: 400 }
+    );
+  }
 
   // Fetch current document
   const { data: document, error: fetchError } = await supabase
@@ -68,9 +76,9 @@ export async function PUT(
   const updates: Record<string, unknown> = {};
 
   // Update content (letter edit)
-  if (body.content !== undefined) {
+  if (parsed.data.content !== undefined) {
     const newVersion = document.version + 1;
-    updates.content = body.content;
+    updates.content = parsed.data.content;
     updates.version = newVersion;
 
     // Get user profile for author name
@@ -84,19 +92,15 @@ export async function PUT(
     await supabase.from("document_versions").insert({
       document_id: id,
       version: newVersion,
-      content: body.content,
+      content: parsed.data.content,
       author: profile?.name || "User",
-      note: body.note || "Manual edit",
+      note: parsed.data.note || "Manual edit",
     });
   }
 
   // Update status
-  if (body.status !== undefined) {
-    updates.status = body.status;
-  }
-
-  if (Object.keys(updates).length === 0) {
-    return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
+  if (parsed.data.status !== undefined) {
+    updates.status = parsed.data.status;
   }
 
   const { data: updated, error: updateError } = await supabase

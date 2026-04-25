@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2 } from "lucide-react";
@@ -45,7 +47,7 @@ export function LetterViewer({
   };
 
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="flex-1 flex flex-col min-w-0">
       {/* Toolbar */}
       <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200">
         <div className="flex gap-1">
@@ -101,7 +103,7 @@ export function LetterViewer({
       </div>
 
       {/* Letter content */}
-      <div className="flex-1 overflow-auto flex justify-center p-7 bg-gray-100">
+      <div className="flex-1 overflow-auto flex justify-center items-start p-7 bg-gray-100">
         <div className="w-full max-w-[620px] bg-white rounded-sm shadow-md p-12 min-h-[600px]">
           {editing ? (
             <Textarea
@@ -110,8 +112,10 @@ export function LetterViewer({
               className="w-full min-h-[550px] border-none outline-none resize-none text-sm leading-7 text-slate-700 font-serif bg-transparent p-0 focus-visible:ring-0 focus-visible:ring-offset-0"
             />
           ) : (
-            <div className="text-sm leading-7 text-slate-700 font-serif whitespace-pre-wrap">
-              {content}
+            <div className="letter-prose text-sm leading-7 text-slate-700 font-serif">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {content}
+              </ReactMarkdown>
             </div>
           )}
         </div>

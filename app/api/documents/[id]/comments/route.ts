@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { commentSchema } from "@/lib/validations";
 
 export async function GET(
   _req: Request,
@@ -46,11 +47,11 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { text } = await req.json();
+  const parsed = commentSchema.safeParse(await req.json());
 
-  if (!text?.trim()) {
+  if (!parsed.success) {
     return NextResponse.json(
-      { error: "Comment text is required" },
+      { error: parsed.error.issues[0].message },
       { status: 400 }
     );
   }
@@ -60,7 +61,7 @@ export async function POST(
     .insert({
       document_id: id,
       author_id: user.id,
-      text: text.trim(),
+      text: parsed.data.text,
     })
     .select("*, author:profiles(id, name, role)")
     .single();

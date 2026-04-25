@@ -1,17 +1,45 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Upload } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { Loader2, Upload } from "lucide-react";
 import { DocViewer } from "@/components/documents/doc-viewer";
-import type { Document } from "@/types";
+import { FileUpload } from "@/components/documents/file-upload";
+import type { Document, StageNumber } from "@/types";
 
 interface DocumentsListProps {
   documents: Document[];
+  caseId?: string;
+  currentStage?: StageNumber;
 }
 
-function StatusDot({ status }: { status: string }) {
-  if (status === "review_needed") {
+function isGenerating(doc: Document): boolean {
+  return (
+    doc.generation_status === "pending" ||
+    doc.generation_status === "generating"
+  );
+}
+
+function StatusDot({ doc }: { doc: Document }) {
+  if (isGenerating(doc)) {
+    return <Loader2 className="h-3 w-3 animate-spin text-amber-500 shrink-0" />;
+  }
+  if (doc.generation_status === "failed") {
+    return (
+      <span className="w-[7px] h-[7px] rounded-full bg-red-500 shrink-0" />
+    );
+  }
+  if (doc.status === "review_needed") {
     return (
       <span className="w-[7px] h-[7px] rounded-full bg-amber-500 shrink-0" />
     );
@@ -19,8 +47,15 @@ function StatusDot({ status }: { status: string }) {
   return null;
 }
 
-export function DocumentsList({ documents }: DocumentsListProps) {
+export function DocumentsList({
+  documents,
+  caseId,
+  currentStage,
+}: DocumentsListProps) {
+  const router = useRouter();
   const [viewingDoc, setViewingDoc] = useState<Document | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadName, setUploadName] = useState("");
 
   const generated = documents.filter((d) => d.type === "generated");
   const uploaded = documents.filter((d) => d.type === "uploaded");
@@ -31,13 +66,29 @@ export function DocumentsList({ documents }: DocumentsListProps) {
     );
   }
 
+  const canUpload = !!caseId && !!currentStage;
+
+  function handleUploaded() {
+    setTimeout(() => {
+      setUploadOpen(false);
+      setUploadName("");
+      router.refresh();
+    }, 800);
+  }
+
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-5 px-6 shadow-sm">
       <div className="flex items-center justify-between mb-3.5">
         <h3 className="text-[15px] font-semibold text-foreground">
           Documents
         </h3>
-        <Button variant="outline" size="sm" className="text-xs h-7 gap-1">
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-xs h-7 gap-1"
+          onClick={() => setUploadOpen(true)}
+          disabled={!canUpload}
+        >
           <Upload className="h-3 w-3" />
           Upload
         </Button>
@@ -82,20 +133,57 @@ export function DocumentsList({ documents }: DocumentsListProps) {
                     })}
                   </div>
                 </div>
-                <StatusDot status={d.status} />
+                <StatusDot doc={d} />
                 <Button
                   variant="outline"
                   size="sm"
                   className="text-xs h-7"
                   onClick={() => setViewingDoc(d)}
+                  disabled={isGenerating(d)}
                 >
-                  View
+                  {isGenerating(d) ? "…" : "View"}
                 </Button>
               </div>
             ))
           )}
         </div>
       ))}
+
+      {canUpload && (
+        <Sheet open={uploadOpen} onOpenChange={setUploadOpen}>
+          <SheetContent side="right" className="w-full sm:max-w-md">
+            <SheetHeader>
+              <SheetTitle>Upload a document</SheetTitle>
+              <SheetDescription>
+                Name your document, then drag a file or click to browse.
+              </SheetDescription>
+            </SheetHeader>
+            <div className="p-4 flex-1 overflow-y-auto space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="doc-name">Document name</Label>
+                <Input
+                  id="doc-name"
+                  placeholder="e.g. IAD Notice, LOMN from Dr. Smith"
+                  value={uploadName}
+                  onChange={(e) => setUploadName(e.target.value)}
+                />
+              </div>
+              {uploadName.trim().length >= 2 ? (
+                <FileUpload
+                  caseId={caseId!}
+                  documentName={uploadName.trim()}
+                  stage={currentStage!}
+                  onUploaded={handleUploaded}
+                />
+              ) : (
+                <p className="text-xs text-gray-400">
+                  Enter a name to enable the upload zone.
+                </p>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
+      )}
     </div>
   );
 }
