@@ -150,7 +150,13 @@ function LoginForm() {
           Continue with Google
         </Button>
       </CardContent>
-      <CardFooter className="justify-center">
+      <CardFooter className="flex-col gap-2 justify-center">
+        <Link
+          href="/forgot-password"
+          className="text-sm text-muted-foreground hover:text-primary hover:underline"
+        >
+          Forgot password?
+        </Link>
         <p className="text-sm text-muted-foreground">
           Don&apos;t have an account?{" "}
           <Link
