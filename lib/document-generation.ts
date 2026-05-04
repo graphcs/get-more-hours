@@ -59,10 +59,26 @@ export async function runDocumentGeneration({
 }): Promise<void> {
   const serviceClient = await createServiceClient();
 
-  await serviceClient
+  // Atomic claim: only proceed if the row was previously pending or failed.
+  // Postgres row-locks per UPDATE, so two concurrent invocations cannot both
+  // pass this filter — one returns 1 row, the other returns 0.
+  const { data: claimed, error: claimErr } = await serviceClient
     .from("documents")
     .update({ generation_status: "generating", generation_error: null })
-    .eq("id", documentId);
+    .eq("id", documentId)
+    .in("generation_status", ["pending", "failed"])
+    .select("id");
+
+  if (claimErr) {
+    console.error("[document-generation] claim failed:", claimErr);
+    throw claimErr;
+  }
+  if (!claimed || claimed.length === 0) {
+    console.log(
+      `[document-generation] skipping ${documentId} — already generating or ready`
+    );
+    return;
+  }
 
   try {
     const { data: caseData, error: caseError } = await serviceClient

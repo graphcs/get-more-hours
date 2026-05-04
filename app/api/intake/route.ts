@@ -1,8 +1,6 @@
-import { after } from "next/server";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { intakeSchema } from "@/lib/validations";
-import { runDocumentGeneration } from "@/lib/document-generation";
 
 export async function POST(req: Request) {
   try {
@@ -150,18 +148,9 @@ export async function POST(req: Request) {
       );
     }
 
-    // Schedule generation to run after the response is sent.
-    // after() is the correct Next.js 16 primitive for post-response background work;
-    // self-referential HTTP fetches are unreliable in the same process.
-    const caseId = newCase.id;
-    const reqDocId = reqDoc.id;
-    const lomnDocId = lomnDoc.id;
-    after(async () => {
-      await Promise.all([
-        runDocumentGeneration({ caseId, documentType: "stage1_request", documentId: reqDocId }),
-        runDocumentGeneration({ caseId, documentType: "stage1_lomn", documentId: lomnDocId }),
-      ]);
-    });
+    // Stage 1 document generation is deferred until the Stage 1 fee is paid.
+    // The Stripe webhook (app/api/stripe/webhook/route.ts) triggers
+    // runDocumentGeneration on checkout.session.completed for the stage_fee.
 
     return NextResponse.json(
       {

@@ -7,6 +7,7 @@ import {
   runDocumentGeneration,
   type DocumentType,
 } from "@/lib/document-generation";
+import { checkStagePaid } from "@/lib/billing/guard";
 
 const openai = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
@@ -140,45 +141,54 @@ async function checkAndTriggerGeneration(
   const caseId = doc.case_id as string;
   const docName = (doc.name as string).toLowerCase();
 
-  const triggerGeneration = async (documentType: DocumentType) => {
+  // Always create the placeholder + advance the case stage. Only schedule
+  // runDocumentGeneration if the stage fee is paid; otherwise the Stripe
+  // webhook's triggerStageGeneration will pick up the pending placeholder
+  // once payment lands.
+  const prepareStage = async (
+    documentType: DocumentType,
+    stageNum: number
+  ) => {
+    await serviceClient
+      .from("cases")
+      .update({ current_stage: stageNum, stage_status: "in_progress" })
+      .eq("id", caseId);
+
     const documentId = await ensurePlaceholderDocument(
       serviceClient,
       caseId,
       documentType
     );
     if (!documentId) return;
+
+    const gate = await checkStagePaid(serviceClient, caseId, stageNum);
+    if (!gate.ok) return;
+
     after(() =>
       runDocumentGeneration({ caseId, documentType, documentId })
     );
   };
 
-  // IAD uploaded → generate Stage 2 appeal + advance case
+  // IAD uploaded → advance to Stage 2 + (if paid) generate appeal.
   if (
     docName.includes("initial adverse") ||
     docName.includes("iad")
   ) {
-    await serviceClient
-      .from("cases")
-      .update({ current_stage: 2, stage_status: "in_progress" })
-      .eq("id", caseId);
-
-    await triggerGeneration("stage2_appeal");
+    await prepareStage("stage2_appeal", 2);
   }
 
-  // FAD uploaded → generate Stage 3 hearing request + advance case
+  // FAD uploaded → advance to Stage 3 + (if paid) generate hearing request.
   if (
     docName.includes("final adverse") ||
     docName.includes("fad")
   ) {
-    await serviceClient
-      .from("cases")
-      .update({ current_stage: 3, stage_status: "in_progress" })
-      .eq("id", caseId);
-
-    await triggerGeneration("stage3_hearing");
+    await prepareStage("stage3_hearing", 3);
   }
 
-  // UAS uploaded → generate Memo of Law (only if already at Stage 3)
+  // UAS uploaded → create Memo of Law placeholder if the case is at Stage 3,
+  // and schedule generation only if Stage 3 is paid. UAS by itself doesn't
+  // advance the case. Since FAD now advances unconditionally, current_stage===3
+  // no longer implies paid — we explicitly gate on checkStagePaid.
   if (docName.includes("uas") || docName.includes("evidence package")) {
     const { data: caseData } = await serviceClient
       .from("cases")
@@ -187,7 +197,23 @@ async function checkAndTriggerGeneration(
       .single();
 
     if (caseData?.current_stage === 3) {
-      await triggerGeneration("stage3_memo");
+      const documentId = await ensurePlaceholderDocument(
+        serviceClient,
+        caseId,
+        "stage3_memo"
+      );
+      if (!documentId) return;
+
+      const gate = await checkStagePaid(serviceClient, caseId, 3);
+      if (!gate.ok) return;
+
+      after(() =>
+        runDocumentGeneration({
+          caseId,
+          documentType: "stage3_memo",
+          documentId,
+        })
+      );
     }
   }
 }

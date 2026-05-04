@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { checkStagePaid } from "@/lib/billing/guard";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
@@ -65,6 +66,10 @@ export async function POST(req: Request) {
       );
     }
 
+    const stageNum = parseInt(stage, 10);
+    const gate = await checkStagePaid(serviceClient, caseId, stageNum);
+    if (!gate.ok) return gate.response;
+
     // Upload to Supabase Storage
     const ext = file.name.split(".").pop() || "pdf";
     const storagePath = `${caseId}/${Date.now()}-${file.name}`;
@@ -95,7 +100,7 @@ export async function POST(req: Request) {
         case_id: caseId,
         name: documentName,
         type: "uploaded",
-        stage: parseInt(stage, 10),
+        stage: stageNum,
         status: "uploaded",
         format,
         storage_path: storagePath,
