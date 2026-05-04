@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { checkStagePaid } from "@/lib/billing/guard";
 
 export async function POST(
   _req: Request,
@@ -25,6 +26,9 @@ export async function POST(
   if (docErr || !doc) {
     return NextResponse.json({ error: "Document not found" }, { status: 404 });
   }
+
+  const gate = await checkStagePaid(supabase, doc.case_id, doc.stage);
+  if (!gate.ok) return gate.response;
 
   const { data: target, error: verErr } = await supabase
     .from("document_versions")

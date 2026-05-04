@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { documentUpdateSchema } from "@/lib/validations";
+import { checkStagePaid } from "@/lib/billing/guard";
 
 export async function GET(
   _req: Request,
@@ -72,6 +73,9 @@ export async function PUT(
   if (fetchError || !document) {
     return NextResponse.json({ error: "Document not found" }, { status: 404 });
   }
+
+  const gate = await checkStagePaid(supabase, document.case_id, document.stage);
+  if (!gate.ok) return gate.response;
 
   const updates: Record<string, unknown> = {};
 

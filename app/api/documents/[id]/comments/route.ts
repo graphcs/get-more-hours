@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { commentSchema } from "@/lib/validations";
+import { checkStagePaid } from "@/lib/billing/guard";
 
 export async function GET(
   _req: Request,
@@ -55,6 +56,19 @@ export async function POST(
       { status: 400 }
     );
   }
+
+  const { data: doc, error: docErr } = await supabase
+    .from("documents")
+    .select("case_id, stage")
+    .eq("id", id)
+    .single();
+
+  if (docErr || !doc) {
+    return NextResponse.json({ error: "Document not found" }, { status: 404 });
+  }
+
+  const gate = await checkStagePaid(supabase, doc.case_id, doc.stage);
+  if (!gate.ok) return gate.response;
 
   const { data: comment, error } = await supabase
     .from("document_comments")

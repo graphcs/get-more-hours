@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
-import { runDocumentGeneration, type DocumentType } from "@/lib/document-generation";
+import { runDocumentGeneration, type DocumentType, STAGE_MAP } from "@/lib/document-generation";
+import { checkStagePaid } from "@/lib/billing/guard";
 
 export async function POST(req: Request) {
   const supabase = await createClient();
@@ -24,6 +25,17 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
+
+  const stage = STAGE_MAP[documentType];
+  if (!stage) {
+    return NextResponse.json(
+      { error: `Unknown documentType: ${documentType}` },
+      { status: 400 }
+    );
+  }
+
+  const gate = await checkStagePaid(supabase, caseId, stage);
+  if (!gate.ok) return gate.response;
 
   // runDocumentGeneration handles generation_status transitions and error capture.
   await runDocumentGeneration({ caseId, documentType, documentId });
