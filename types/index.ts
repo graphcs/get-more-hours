@@ -128,6 +128,20 @@ export interface CRMNote {
   author?: Profile;
 }
 
+export interface AiPrompt {
+  key:
+    | "stage1_request_system"
+    | "stage1_lomn_system"
+    | "stage2_appeal_system"
+    | "stage3_hearing_system"
+    | "stage3_memo_system"
+    | "ocr_extraction";
+  content: string;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ─── Form Types ───
 export interface IntakeFormData {
   // Step 1: Personal Info

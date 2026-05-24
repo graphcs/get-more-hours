@@ -8,6 +8,7 @@ import {
   type DocumentType,
 } from "@/lib/document-generation";
 import { checkStagePaid } from "@/lib/billing/guard";
+import { getAiSystemPrompt } from "@/lib/prompts";
 
 const openai = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
@@ -76,6 +77,10 @@ export async function POST(req: Request) {
     const base64 = Buffer.from(arrayBuffer).toString("base64");
 
     const mimeType = doc.format === "pdf" ? "application/pdf" : "image/jpeg";
+    const extractionPrompt = await getAiSystemPrompt(
+      serviceClient,
+      "ocr_extraction"
+    );
 
     // Send to vision model for OCR
     const response = await openai.chat.completions.create({
@@ -86,7 +91,7 @@ export async function POST(req: Request) {
           content: [
             {
               type: "text",
-              text: "Extract all text from this document. Preserve the structure, headings, and formatting as closely as possible. Return only the extracted text, no commentary.",
+              text: extractionPrompt,
             },
             {
               type: "image_url",

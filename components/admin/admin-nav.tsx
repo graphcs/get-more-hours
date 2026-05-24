@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   CreditCard,
   Mail,
+  MessageSquareText,
   Settings,
   LogOut,
 } from "lucide-react";
@@ -24,6 +25,7 @@ const navItems = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/contact-submissions", label: "Inquiries", icon: Mail },
   { href: "/admin/billing", label: "Billing", icon: CreditCard },
+  { href: "/admin/system-prompt", label: "System Prompt", icon: MessageSquareText },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
 

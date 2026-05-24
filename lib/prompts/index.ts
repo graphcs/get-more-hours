@@ -22,3 +22,13 @@ export {
   STAGE3_MEMO_SYSTEM_PROMPT,
   buildStage3MemoPrompt,
 } from "./stage3-memo-of-law";
+
+export { OCR_EXTRACTION_PROMPT } from "./ocr";
+
+export {
+  PROMPT_CONFIGS,
+  PROMPT_KEYS,
+  getPromptConfig,
+  getAiSystemPrompt,
+  type PromptKey,
+} from "./config";

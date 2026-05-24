@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PROMPT_KEYS } from "@/lib/prompts";
 
 export const loginSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -91,4 +92,13 @@ export const stageUpdateSchema = z
 
 export const commentSchema = z.object({
   text: z.string().trim().min(1, "Comment cannot be empty").max(5000),
+});
+
+export const systemPromptSchema = z.object({
+  key: z.enum(PROMPT_KEYS),
+  content: z
+    .string()
+    .trim()
+    .min(1, "Prompt cannot be empty")
+    .max(20000, "Prompt must be 20,000 characters or less"),
 });

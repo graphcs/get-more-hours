@@ -1,15 +1,11 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { generateDocument } from "@/lib/openrouter";
 import {
-  STAGE1_REQUEST_SYSTEM_PROMPT,
+  getAiSystemPrompt,
   buildStage1RequestPrompt,
-  STAGE1_LOMN_SYSTEM_PROMPT,
   buildStage1LomnPrompt,
-  STAGE2_APPEAL_SYSTEM_PROMPT,
   buildStage2AppealPrompt,
-  STAGE3_HEARING_SYSTEM_PROMPT,
   buildStage3HearingPrompt,
-  STAGE3_MEMO_SYSTEM_PROMPT,
   buildStage3MemoPrompt,
 } from "@/lib/prompts";
 import type { Case, IntakeData, Document } from "@/types";
@@ -115,12 +111,12 @@ export async function runDocumentGeneration({
 
     switch (documentType) {
       case "stage1_request":
-        systemPrompt = STAGE1_REQUEST_SYSTEM_PROMPT;
+        systemPrompt = await getAiSystemPrompt(serviceClient, "stage1_request_system");
         userPrompt = buildStage1RequestPrompt(typedCase, typedIntake);
         break;
 
       case "stage1_lomn":
-        systemPrompt = STAGE1_LOMN_SYSTEM_PROMPT;
+        systemPrompt = await getAiSystemPrompt(serviceClient, "stage1_lomn_system");
         userPrompt = buildStage1LomnPrompt(typedCase, typedIntake);
         break;
 
@@ -128,7 +124,7 @@ export async function runDocumentGeneration({
         const iadText = findOcrText(docs, "iad", "initial adverse", "adverse determination");
         if (!iadText) throw new Error("IAD OCR text not found. Upload and process the IAD first.");
         const lomnText = findOcrText(docs, "lomn", "medical necessity");
-        systemPrompt = STAGE2_APPEAL_SYSTEM_PROMPT;
+        systemPrompt = await getAiSystemPrompt(serviceClient, "stage2_appeal_system");
         userPrompt = buildStage2AppealPrompt(typedCase, typedIntake, iadText, lomnText);
         break;
       }
@@ -136,7 +132,7 @@ export async function runDocumentGeneration({
       case "stage3_hearing": {
         const fadText = findOcrText(docs, "fad", "final adverse");
         if (!fadText) throw new Error("FAD OCR text not found. Upload and process the FAD first.");
-        systemPrompt = STAGE3_HEARING_SYSTEM_PROMPT;
+        systemPrompt = await getAiSystemPrompt(serviceClient, "stage3_hearing_system");
         userPrompt = buildStage3HearingPrompt(typedCase, typedIntake, fadText);
         break;
       }
@@ -148,7 +144,7 @@ export async function runDocumentGeneration({
           throw new Error("FAD and UAS OCR text required. Upload and process both first.");
         }
         const lomnText2 = findOcrText(docs, "lomn", "medical necessity");
-        systemPrompt = STAGE3_MEMO_SYSTEM_PROMPT;
+        systemPrompt = await getAiSystemPrompt(serviceClient, "stage3_memo_system");
         userPrompt = buildStage3MemoPrompt(typedCase, typedIntake, fadText2, uasText, lomnText2);
         break;
       }
