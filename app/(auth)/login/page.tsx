@@ -4,7 +4,7 @@ import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -17,6 +17,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 function LoginForm() {
   const searchParams = useSearchParams();
@@ -149,6 +150,38 @@ function LoginForm() {
           )}
           Continue with Google
         </Button>
+
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <Separator className="w-full" />
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-card px-2 text-muted-foreground">
+              Or preview the demo
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <Link
+            href="/preview/dashboard"
+            className={cn(
+              buttonVariants({ variant: "secondary", size: "lg" }),
+              "w-full"
+            )}
+          >
+            Client view
+          </Link>
+          <Link
+            href="/preview/admin"
+            className={cn(
+              buttonVariants({ variant: "secondary", size: "lg" }),
+              "w-full"
+            )}
+          >
+            Admin view
+          </Link>
+        </div>
       </CardContent>
       <CardFooter className="flex-col gap-2 justify-center">
         <Link
