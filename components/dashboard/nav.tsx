@@ -51,7 +51,7 @@ export function DashboardNav({ user }: DashboardNavProps) {
   };
 
   return (
-    <aside className="hidden md:flex w-64 flex-col border-r bg-background p-4">
+    <aside className="hidden md:flex w-64 flex-col border-r bg-background p-4 sticky top-0 h-screen self-start overflow-y-auto">
       <div className="mb-4 px-2 pt-2">
         <Logo height={18} href="/" />
       </div>
