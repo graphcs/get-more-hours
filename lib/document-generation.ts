@@ -181,22 +181,32 @@ export async function runDocumentGeneration({
       }`,
     });
 
-    if (documentType === "stage2_appeal") {
-      await serviceClient.from("billing").insert({
-        case_id: caseId,
-        stage: 2,
-        amount: 14900,
-        type: "stage_fee",
-        status: "pending",
-      });
-    } else if (documentType === "stage3_hearing") {
-      await serviceClient.from("billing").insert({
-        case_id: caseId,
-        stage: 3,
-        amount: 29900,
-        type: "stage_fee",
-        status: "pending",
-      });
+    // Generating a stage 2/3 doc means the case has reached that stage, so make
+    // sure there's a billing row prompting the client to pay — but only if one
+    // doesn't already exist. Re-running generation (e.g. after an OCR retry)
+    // must not stack duplicate pending rows on top of an already paid/comped fee.
+    const stageFee: Record<string, { stage: number; amount: number }> = {
+      stage2_appeal: { stage: 2, amount: 14900 },
+      stage3_hearing: { stage: 3, amount: 29900 },
+    };
+    const fee = stageFee[documentType];
+    if (fee) {
+      const { data: existingFee } = await serviceClient
+        .from("billing")
+        .select("id")
+        .eq("case_id", caseId)
+        .eq("stage", fee.stage)
+        .eq("type", "stage_fee")
+        .limit(1);
+      if (!existingFee || existingFee.length === 0) {
+        await serviceClient.from("billing").insert({
+          case_id: caseId,
+          stage: fee.stage,
+          amount: fee.amount,
+          type: "stage_fee",
+          status: "pending",
+        });
+      }
     }
   } catch (err) {
     console.error(`[document-generation] ${documentType} failed:`, err);
