@@ -47,7 +47,11 @@ export function FileUpload({
         const result = await res.json();
 
         if (!res.ok) {
-          setError(result.error || "Upload failed");
+          setError(
+            res.status === 402
+              ? "This stage isn't unlocked yet — pay the stage fee on the Billing page to continue."
+              : result.error || "Upload failed"
+          );
           setUploading(false);
           return;
         }

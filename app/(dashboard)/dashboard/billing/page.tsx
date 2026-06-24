@@ -28,6 +28,14 @@ export default async function BillingPage() {
   // White Glove bypasses every per-stage gate (lib/billing/guard.ts), so a
   // white-glove case has nothing to pay — no "Pay Now", no upsell.
   const isWhiteGlove = typedCase.tier === "white_glove";
+  // A stage's fee is payable once the previous stage's fee is paid (sequential
+  // unlock). Without this, a self-serve client can't pay for the next stage —
+  // and since uploads (e.g. the IAD that advances Stage 1→2) are gated on that
+  // stage being paid, they'd be unable to advance at all.
+  const isStageFeePaid = (n: number) =>
+    records.some(
+      (r) => r.stage === n && r.type === "stage_fee" && r.status === "paid"
+    );
 
   const stages = [
     { num: 1, label: STAGE_LABELS[1], price: PRICING.stage1 },
@@ -53,6 +61,8 @@ export default async function BillingPage() {
           const paid = stageRecords.some((r) => r.status === "paid");
           const latest = stageRecords[stageRecords.length - 1];
           const isCurrent = typedCase.current_stage === s.num;
+          const unlocked =
+            s.num === 1 || isCurrent || isStageFeePaid(s.num - 1);
 
           return (
             <div
@@ -80,7 +90,7 @@ export default async function BillingPage() {
                 <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-purple-50 text-purple-600">
                   Included · White Glove
                 </span>
-              ) : isCurrent ? (
+              ) : unlocked ? (
                 <BillingClient
                   caseId={typedCase.id}
                   stage={s.num}
