@@ -35,29 +35,143 @@ export const contactStatusSchema = z.object({
   status: z.enum(["new", "contacted", "resolved"]),
 });
 
+/**
+ * A required free-text field. The message is attached at the schema level as
+ * well as to `.min(1)` so a missing key, a null and an empty string all produce
+ * the same human-readable sentence instead of zod's "expected string, received
+ * undefined".
+ */
+const requiredText = (message: string) =>
+  z.string({ error: message }).trim().min(1, message);
+
+/**
+ * The intake form models unselected number dropdowns as `""` (see
+ * `IntakeFormData`). A bare `z.coerce.number()` turns `""` into `0`, which then
+ * fails `.positive()` with a confusing "must be positive" message — so blank is
+ * normalised to `undefined` first and reported as a plain "is required".
+ */
+const countField = (label: string, { positive }: { positive: boolean }) =>
+  z.preprocess(
+    (v) => (v === "" || v === null || v === undefined ? undefined : v),
+    positive
+      ? z.coerce
+          .number({ error: `${label} is required` })
+          .int(`${label} must be a whole number`)
+          .positive(`${label} must be greater than zero`)
+      : z.coerce
+          .number({ error: `${label} is required` })
+          .int(`${label} must be a whole number`)
+          .min(0, `${label} cannot be negative`)
+  );
+
 export const intakeSchema = z.object({
-  firstName: z.string().min(1, "First name is required"),
-  lastName: z.string().min(1, "Last name is required"),
-  dob: z.string().optional(),
-  phone: z.string().optional(),
+  firstName: requiredText("First name is required"),
+  lastName: requiredText("Last name is required"),
+  dob: requiredText("Date of birth is required"),
+  phone: requiredText("Phone number is required"),
   email: z.string().email("Invalid email address").optional().or(z.literal("")),
-  address: z.string().optional(),
-  city: z.string().optional(),
+  address: requiredText("Address is required"),
+  city: requiredText("City is required"),
   state: z.string().default("NY"),
-  zip: z.string().optional(),
-  mltc: z.string().min(1, "MLTC is required"),
-  currentHours: z.coerce.number().int().min(0),
-  currentDays: z.coerce.number().int().min(0),
-  requestedHours: z.coerce.number().int().positive("Requested hours must be positive"),
-  requestedDays: z.coerce.number().int().positive("Requested days must be positive"),
+  zip: requiredText("ZIP code is required"),
+  mltc: requiredText("MLTC is required"),
+  currentHours: countField("Current hours per day", { positive: false }),
+  currentDays: countField("Days per week", { positive: false }),
+  requestedHours: countField("Requested hours per day", { positive: true }),
+  requestedDays: countField("Requested days per week", { positive: true }),
   conditions: z.array(z.string()).default([]),
   otherConditions: z.string().optional(),
-  changeDescription: z.string().min(1, "Please describe what has changed recently"),
+  changeDescription: requiredText(
+    "Please describe what has changed recently"
+  ),
   adlLevels: z
     .record(z.string(), z.enum(["independent", "some_help", "full_help"]))
     .default({}),
   adlNotes: z.string().optional(),
 });
+
+export type IntakeField = keyof typeof intakeSchema.shape;
+
+/** Validation errors keyed by intake field name. */
+export type IntakeFieldErrors = Partial<Record<IntakeField, string>>;
+
+/**
+ * Which fields belong to which wizard step. The order matches
+ * `STEP_LABELS` in `components/intake/intake-form.tsx`. Keeping the map here —
+ * next to the schema — is what lets both the client wizard and the API agree on
+ * where a given error belongs.
+ */
+export const INTAKE_STEP_FIELDS = [
+  [
+    "firstName",
+    "lastName",
+    "dob",
+    "phone",
+    "email",
+    "address",
+    "city",
+    "state",
+    "zip",
+    "mltc",
+    "currentHours",
+    "currentDays",
+    "requestedHours",
+    "requestedDays",
+  ],
+  ["conditions", "otherConditions", "changeDescription"],
+  ["adlLevels", "adlNotes"],
+  [],
+] as const satisfies readonly (readonly IntakeField[])[];
+
+export const INTAKE_REVIEW_STEP = INTAKE_STEP_FIELDS.length - 1;
+
+/** A schema covering only the fields shown on `step`. */
+export function intakeStepSchema(step: number) {
+  const fields = INTAKE_STEP_FIELDS[step] ?? [];
+  const mask = Object.fromEntries(fields.map((f) => [f, true as const]));
+  return intakeSchema.pick(mask as Record<IntakeField, true>);
+}
+
+/** The wizard step that owns `field`, or the review step if it is unknown. */
+export function stepForIntakeField(field: string): number {
+  const index = INTAKE_STEP_FIELDS.findIndex((fields) =>
+    (fields as readonly string[]).includes(field)
+  );
+  return index === -1 ? INTAKE_REVIEW_STEP : index;
+}
+
+/**
+ * True when the schema rejects a missing value for `field`. The UI reads this
+ * instead of hardcoding asterisks, so the required marker and the enforced
+ * behaviour can never drift apart.
+ */
+export function isIntakeFieldRequired(field: IntakeField): boolean {
+  return !intakeSchema.shape[field].safeParse(undefined).success;
+}
+
+/** Flatten a zod error into one message per field (first issue wins). */
+export function toIntakeFieldErrors(
+  issues: readonly { path: PropertyKey[] | readonly PropertyKey[]; message: string }[]
+): IntakeFieldErrors {
+  const errors: IntakeFieldErrors = {};
+  for (const issue of issues) {
+    const key = issue.path[0];
+    if (typeof key !== "string") continue;
+    if (!(key in intakeSchema.shape)) continue;
+    const field = key as IntakeField;
+    if (errors[field] === undefined) errors[field] = issue.message;
+  }
+  return errors;
+}
+
+/** Validate a single wizard step. Returns `{}` when the step is complete. */
+export function validateIntakeStep(
+  step: number,
+  data: unknown
+): IntakeFieldErrors {
+  const parsed = intakeStepSchema(step).safeParse(data);
+  return parsed.success ? {} : toIntakeFieldErrors(parsed.error.issues);
+}
 
 export const documentUpdateSchema = z
   .object({

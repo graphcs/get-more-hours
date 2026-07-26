@@ -1,16 +1,11 @@
 "use client";
 
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { MEDICAL_CONDITIONS } from "@/lib/constants";
-import type { IntakeFormData } from "@/types";
+import { Field, fieldControlProps } from "./field";
+import type { StepProps } from "./field";
 import { Lightbulb } from "lucide-react";
-
-interface StepProps {
-  data: IntakeFormData;
-  setData: (data: IntakeFormData) => void;
-}
 
 function ConditionCard({
   label,
@@ -61,7 +56,7 @@ function ConditionCard({
   );
 }
 
-export function StepMedicalConditions({ data, setData }: StepProps) {
+export function StepMedicalConditions({ data, setData, errors }: StepProps) {
   const toggle = (condition: string) => {
     const next = data.conditions.includes(condition)
       ? data.conditions.filter((c) => c !== condition)
@@ -98,34 +93,32 @@ export function StepMedicalConditions({ data, setData }: StepProps) {
         ))}
       </div>
 
-      <div className="mb-5">
-        <Label className="text-[15px] font-medium text-foreground mb-1 block">
-          Other Medical Conditions
-        </Label>
-        <p className="text-sm text-gray-500 mb-1.5">
-          List any conditions not shown above, separated by commas
-        </p>
+      <Field
+        name="otherConditions"
+        label="Other Medical Conditions"
+        hint="List any conditions not shown above, separated by commas"
+        errors={errors}
+      >
         <Input
+          {...fieldControlProps("otherConditions", errors)}
           value={data.otherConditions}
           onChange={(e) =>
             setData({ ...data, otherConditions: e.target.value })
           }
           placeholder="e.g., Fibromyalgia, Sleep Apnea"
         />
-      </div>
+      </Field>
 
       <div className="h-px bg-gray-200 my-6" />
 
-      <div className="mb-5">
-        <Label className="text-[15px] font-medium text-foreground mb-1 block">
-          What has changed recently?
-          <span className="text-destructive ml-1">*</span>
-        </Label>
-        <p className="text-sm text-gray-500 mb-1.5 leading-snug">
-          Describe what changed in the patient&apos;s health or daily life that
-          makes more hours necessary. This is very important for your case.
-        </p>
+      <Field
+        name="changeDescription"
+        label="What has changed recently?"
+        hint="Describe what changed in the patient's health or daily life that makes more hours necessary. This is very important for your case."
+        errors={errors}
+      >
         <Textarea
+          {...fieldControlProps("changeDescription", errors)}
           value={data.changeDescription}
           onChange={(e) =>
             setData({ ...data, changeDescription: e.target.value })
@@ -133,7 +126,7 @@ export function StepMedicalConditions({ data, setData }: StepProps) {
           rows={5}
           placeholder='For example: "My mother had a fall in January and broke her hip. Since then, she cannot walk without help and needs assistance getting to the bathroom, getting dressed, and preparing meals. She also has worsening dementia and cannot be left alone safely."'
         />
-      </div>
+      </Field>
     </div>
   );
 }

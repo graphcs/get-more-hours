@@ -3,13 +3,9 @@
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ADL_CATEGORIES, ADL_LEVELS } from "@/lib/constants";
-import type { IntakeFormData, AdlLevel } from "@/types";
+import type { AdlLevel } from "@/types";
+import type { StepProps } from "./field";
 import { ClipboardList } from "lucide-react";
-
-interface StepProps {
-  data: IntakeFormData;
-  setData: (data: IntakeFormData) => void;
-}
 
 const levelStyles: Record<
   string,

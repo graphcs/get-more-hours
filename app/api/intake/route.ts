@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { intakeSchema } from "@/lib/validations";
 import { ensureStageFeeRow } from "@/lib/billing/stage-payment";
 import { createCheckoutSession } from "@/lib/stripe";
+import { findUsableCase } from "@/lib/intake-case";
 
 export async function POST(req: Request) {
   try {
@@ -18,21 +19,26 @@ export async function POST(req: Request) {
     const parsed = intakeSchema.safeParse(await req.json());
 
     if (!parsed.success) {
+      // `error` stays the first message for backward compatibility; `issues`
+      // lets the wizard highlight every offending field and jump the user back
+      // to the step that owns the first one.
       return NextResponse.json(
-        { error: parsed.error.issues[0].message },
+        {
+          error: parsed.error.issues[0].message,
+          issues: parsed.error.issues.map((issue) => ({
+            path: issue.path.map(String),
+            message: issue.message,
+          })),
+        },
         { status: 400 }
       );
     }
 
     const body = parsed.data;
 
-    // Check if user already has a case
-    const { data: existingCase } = await supabase
-      .from("cases")
-      .select("id")
-      .eq("user_id", user.id)
-      .limit(1)
-      .single();
+    // Check if user already has a *complete* case. An orphaned case row from a
+    // previously failed intake is cleaned up rather than treated as a case.
+    const existingCase = await findUsableCase(supabase, user.id);
 
     if (existingCase) {
       return NextResponse.json(
@@ -65,47 +71,67 @@ export async function POST(req: Request) {
       );
     }
 
-    // Create intake data
-    const { error: intakeError } = await supabase.from("intake_data").insert({
-      case_id: newCase.id,
-      first_name: body.firstName,
-      last_name: body.lastName,
-      dob: body.dob || null,
-      phone: body.phone || null,
-      email: body.email || null,
-      address: body.address || null,
-      city: body.city || null,
-      state: body.state || "NY",
-      zip: body.zip || null,
-      conditions: body.conditions || [],
-      other_conditions: body.otherConditions || null,
-      change_description: body.changeDescription,
-      adl_levels: body.adlLevels || {},
-      adl_notes: body.adlNotes || null,
-    });
+    // The block below belongs to one logical transaction. PostgREST gives us no
+    // multi-statement transaction, so any failure is rolled back by deleting
+    // the case — every child table (intake_data, billing, documents) is
+    // ON DELETE CASCADE. Previously a failed document insert returned 500 but
+    // left the case row behind, after which /intake redirected to /dashboard
+    // and this route answered 409: the user was locked out of intake forever.
+    //
+    // Scope matters. Only the rows that make a case *usable* live in here;
+    // Stripe Checkout is deliberately outside it (see below), because a Stripe
+    // outage must never cost a client their intake.
+    const rollback = async (reason: string, cause: unknown) => {
+      console.error(`Intake rollback (${reason}):`, cause);
+      const { error: rollbackError } = await supabase
+        .from("cases")
+        .delete()
+        .eq("id", newCase.id);
+      if (rollbackError) {
+        console.error("Intake rollback failed to delete case:", rollbackError);
+      }
+    };
 
-    if (intakeError) {
-      console.error("Intake data error:", intakeError);
-      // Clean up the case if intake fails
-      await supabase.from("cases").delete().eq("id", newCase.id);
-      return NextResponse.json(
-        { error: "Failed to save intake data" },
-        { status: 500 }
-      );
-    }
+    try {
+      // Create intake data
+      const { error: intakeError } = await supabase.from("intake_data").insert({
+        case_id: newCase.id,
+        first_name: body.firstName,
+        last_name: body.lastName,
+        dob: body.dob || null,
+        phone: body.phone || null,
+        email: body.email || null,
+        address: body.address || null,
+        city: body.city || null,
+        state: body.state || "NY",
+        zip: body.zip || null,
+        conditions: body.conditions || [],
+        other_conditions: body.otherConditions || null,
+        change_description: body.changeDescription,
+        adl_levels: body.adlLevels || {},
+        adl_notes: body.adlNotes || null,
+      });
 
-    // Create the pending Stage 1 fee row (amount comes from PRICING).
-    await ensureStageFeeRow(supabase, newCase.id, 1);
+      if (intakeError) {
+        await rollback("intake_data", intakeError);
+        return NextResponse.json(
+          { error: "Failed to save intake data" },
+          { status: 500 }
+        );
+      }
 
-    // Update profile name if needed
-    await supabase
-      .from("profiles")
-      .update({ name: `${body.firstName} ${body.lastName}` })
-      .eq("id", user.id);
+      // Create the pending Stage 1 fee row (amount comes from PRICING).
+      // ensureStageFeeRow is idempotent and self-healing — it logs rather than
+      // throwing on a write failure, and every path that makes a stage
+      // reachable calls it again — so a hiccup there is not worth discarding a
+      // completed intake over. A hard throw still lands in the catch below.
+      await ensureStageFeeRow(supabase, newCase.id, 1);
 
-    // Create placeholder documents so the UI can poll for generation status.
-    const [{ data: reqDoc, error: reqErr }, { data: lomnDoc, error: lomnErr }] =
-      await Promise.all([
+      // Create placeholder documents so the UI can poll for generation status.
+      const [
+        { data: reqDoc, error: reqErr },
+        { data: lomnDoc, error: lomnErr },
+      ] = await Promise.all([
         supabase
           .from("documents")
           .insert({
@@ -136,12 +162,32 @@ export async function POST(req: Request) {
           .single(),
       ]);
 
-    if (reqErr || lomnErr || !reqDoc || !lomnDoc) {
-      console.error("Placeholder document insert failed:", reqErr || lomnErr);
+      if (reqErr || lomnErr || !reqDoc || !lomnDoc) {
+        await rollback("documents", reqErr || lomnErr);
+        return NextResponse.json(
+          { error: "Failed to initialize documents" },
+          { status: 500 }
+        );
+      }
+    } catch (err) {
+      await rollback("unexpected", err);
       return NextResponse.json(
-        { error: "Failed to initialize documents" },
+        { error: "Something went wrong" },
         { status: 500 }
       );
+    }
+
+    // ── The case is committed. Nothing past this point may roll it back. ──
+
+    // Best-effort, non-critical: keep the profile name in sync. A failure here
+    // must not undo a case the user successfully completed.
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .update({ name: `${body.firstName} ${body.lastName}` })
+      .eq("id", user.id);
+
+    if (profileError) {
+      console.error("Profile name update failed:", profileError);
     }
 
     // Stage 1 document generation is deferred until the Stage 1 fee is paid —
@@ -169,7 +215,9 @@ export async function POST(req: Request) {
       });
       checkoutUrl = session.url;
     } catch (err) {
-      // The case is saved either way; the client can pay from /dashboard/billing.
+      // Deliberately NOT a rollback. The case, its intake and the pending fee
+      // row are already saved, so the client can pay from /dashboard/billing.
+      // A Stripe outage must not destroy a completed intake.
       console.error("Intake checkout session creation failed:", err);
     }
 
