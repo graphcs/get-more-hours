@@ -4,7 +4,22 @@ import { BILLING_STATUS_MAP, STAGE_LABELS, PRICING } from "@/lib/constants";
 import { BillingClient } from "@/components/dashboard/billing-client";
 import type { Case, BillingRecord } from "@/types";
 
-export default async function BillingPage() {
+export default async function BillingPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ stage?: string }>;
+}) {
+  // The payment gate (lib/billing/guard.ts) deep-links here as
+  // /dashboard/billing?stage=N, and abandoned Checkout sessions land here too.
+  // This page used to ignore ?stage= entirely, so the guard's redirect dropped
+  // the user on a generic page with no indication of what to do.
+  const { stage: stageParam } = await searchParams;
+  const focusedStage = Number(stageParam);
+  const highlightStage =
+    Number.isInteger(focusedStage) && focusedStage >= 1 && focusedStage <= 3
+      ? focusedStage
+      : null;
+
   const { supabase, user } = await getRequiredUser();
 
   const { data: caseData } = await supabase
@@ -37,6 +52,15 @@ export default async function BillingPage() {
       (r) => r.stage === n && r.type === "stage_fee" && r.status === "paid"
     );
 
+  const focusedUnpaid =
+    highlightStage !== null && !isWhiteGlove && !isStageFeePaid(highlightStage);
+  // A deep link to a stage whose predecessor is still unpaid: tell the user
+  // what actually has to happen first rather than pointing at a disabled card.
+  const focusedBlockedBy =
+    focusedUnpaid && highlightStage! > 1 && !isStageFeePaid(highlightStage! - 1)
+      ? highlightStage! - 1
+      : null;
+
   const stages = [
     { num: 1, label: STAGE_LABELS[1], price: PRICING.stage1 },
     { num: 2, label: STAGE_LABELS[2], price: PRICING.stage2 },
@@ -51,6 +75,30 @@ export default async function BillingPage() {
           Manage payments for your case
         </p>
       </div>
+
+      {highlightStage !== null && focusedUnpaid && (
+        <div className="mb-6 rounded-xl border-2 border-amber-300 bg-amber-50 p-5 px-6">
+          <h2 className="text-[15px] font-bold text-amber-900">
+            Stage {highlightStage} — {STAGE_LABELS[highlightStage]} is unpaid
+          </h2>
+          <p className="mt-1 text-sm leading-relaxed text-amber-900/80">
+            {focusedBlockedBy ? (
+              <>
+                Your Stage {highlightStage} documents will not be generated
+                until this fee is paid, and Stage {focusedBlockedBy} must be
+                paid first. Start with the Stage {focusedBlockedBy} card below.
+              </>
+            ) : (
+              <>
+                Your Stage {highlightStage} documents will not be generated
+                until this fee is paid. Use{" "}
+                <span className="font-semibold">Pay Now</span> on the Stage{" "}
+                {highlightStage} card below to continue.
+              </>
+            )}
+          </p>
+        </div>
+      )}
 
       {/* Pricing cards */}
       <div className="grid grid-cols-3 gap-3 mb-6">
@@ -67,8 +115,13 @@ export default async function BillingPage() {
           return (
             <div
               key={s.num}
+              id={`stage-${s.num}`}
               className={`bg-white border rounded-xl p-5 shadow-sm ${
-                isCurrent ? "border-primary" : "border-gray-200"
+                highlightStage === s.num && !paid
+                  ? "border-amber-400 border-2 ring-4 ring-amber-100"
+                  : isCurrent
+                    ? "border-primary"
+                    : "border-gray-200"
               }`}
             >
               <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">

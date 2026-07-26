@@ -8,6 +8,7 @@ import {
   type DocumentType,
 } from "@/lib/document-generation";
 import { checkStagePaid } from "@/lib/billing/guard";
+import { ensureStageFeeRow } from "@/lib/billing/stage-payment";
 import { getAiSystemPrompt } from "@/lib/prompts";
 
 const openai = new OpenAI({
@@ -146,10 +147,11 @@ async function checkAndTriggerGeneration(
   const caseId = doc.case_id as string;
   const docName = (doc.name as string).toLowerCase();
 
-  // Always create the placeholder + advance the case stage. Only schedule
-  // runDocumentGeneration if the stage fee is paid; otherwise the Stripe
-  // webhook's triggerStageGeneration will pick up the pending placeholder
-  // once payment lands.
+  // Always create the placeholder + advance the case stage + make sure the
+  // stage's fee row exists so the client is actually asked to pay. Only
+  // schedule runDocumentGeneration if the stage fee is already paid; otherwise
+  // markStagePaid's triggerStageGeneration picks up the pending placeholder
+  // once payment (or an admin comp) lands.
   const prepareStage = async (
     documentType: DocumentType,
     stageNum: number
@@ -158,6 +160,8 @@ async function checkAndTriggerGeneration(
       .from("cases")
       .update({ current_stage: stageNum, stage_status: "in_progress" })
       .eq("id", caseId);
+
+    await ensureStageFeeRow(serviceClient, caseId, stageNum);
 
     const documentId = await ensurePlaceholderDocument(
       serviceClient,

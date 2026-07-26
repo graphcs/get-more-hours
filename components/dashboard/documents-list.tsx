@@ -12,7 +12,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Loader2, Upload } from "lucide-react";
+import { CreditCard, Loader2, Upload } from "lucide-react";
 import { DocViewer } from "@/components/documents/doc-viewer";
 import { FileUpload } from "@/components/documents/file-upload";
 import type { Document, StageNumber } from "@/types";
@@ -21,6 +21,8 @@ interface DocumentsListProps {
   documents: Document[];
   caseId?: string;
   currentStage?: StageNumber;
+  /** True when the current stage's fee is unpaid — nothing is actually generating. */
+  paymentGated?: boolean;
 }
 
 function isGenerating(doc: Document): boolean {
@@ -30,9 +32,16 @@ function isGenerating(doc: Document): boolean {
   );
 }
 
-function StatusDot({ doc }: { doc: Document }) {
+function StatusDot({ doc, gated }: { doc: Document; gated: boolean }) {
   if (isGenerating(doc)) {
-    return <Loader2 className="h-3 w-3 animate-spin text-amber-500 shrink-0" />;
+    return gated ? (
+      <CreditCard
+        className="h-3 w-3 text-amber-600 shrink-0"
+        aria-label="Payment required"
+      />
+    ) : (
+      <Loader2 className="h-3 w-3 animate-spin text-amber-500 shrink-0" />
+    );
   }
   if (doc.generation_status === "failed") {
     return (
@@ -51,6 +60,7 @@ export function DocumentsList({
   documents,
   caseId,
   currentStage,
+  paymentGated = false,
 }: DocumentsListProps) {
   const router = useRouter();
   const [viewingDoc, setViewingDoc] = useState<Document | null>(null);
@@ -133,7 +143,7 @@ export function DocumentsList({
                     })}
                   </div>
                 </div>
-                <StatusDot doc={d} />
+                <StatusDot doc={d} gated={paymentGated} />
                 <Button
                   variant="outline"
                   size="sm"
@@ -141,7 +151,11 @@ export function DocumentsList({
                   onClick={() => setViewingDoc(d)}
                   disabled={isGenerating(d)}
                 >
-                  {isGenerating(d) ? "…" : "View"}
+                  {!isGenerating(d)
+                    ? "View"
+                    : paymentGated
+                      ? "Locked"
+                      : "…"}
                 </Button>
               </div>
             ))

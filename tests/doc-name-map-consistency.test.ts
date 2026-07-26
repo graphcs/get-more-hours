@@ -22,11 +22,38 @@ import { describe, expect, it } from "vitest";
 const ROOT = join(__dirname, "..");
 
 const DOC_GENERATION = "lib/document-generation.ts";
-const STRIPE_WEBHOOK = "app/api/stripe/webhook/route.ts";
 const DOC_VIEWER = "components/documents/doc-viewer.tsx";
+
+/**
+ * `NAME_TO_TYPE` is the payment-side inverse of NAME_MAP. It has moved once
+ * already (out of the Stripe webhook and into the shared stage-payment lib, so
+ * that comping a stage triggers generation the same way a Stripe payment does),
+ * so this test locates it rather than pinning a path — the point is to catch
+ * the maps drifting apart, not to freeze the file layout.
+ */
+const NAME_TO_TYPE_CANDIDATES = [
+  "lib/billing/stage-payment.ts",
+  "app/api/stripe/webhook/route.ts",
+];
 
 function read(relPath: string): string {
   return readFileSync(join(ROOT, relPath), "utf8");
+}
+
+function findNameToTypeSource(): { path: string; source: string } {
+  for (const path of NAME_TO_TYPE_CANDIDATES) {
+    let source: string;
+    try {
+      source = read(path);
+    } catch {
+      continue;
+    }
+    if (/\bNAME_TO_TYPE\b/.test(source)) return { path, source };
+  }
+  throw new Error(
+    `NAME_TO_TYPE not found in any of: ${NAME_TO_TYPE_CANDIDATES.join(", ")}. ` +
+      "If it moved again, add the new path to NAME_TO_TYPE_CANDIDATES."
+  );
 }
 
 /**
@@ -91,14 +118,16 @@ describe("NAME_MAP (lib/document-generation.ts) is the source of truth", () => {
   });
 });
 
-describe("app/api/stripe/webhook/route.ts stays in sync", () => {
-  const source = read(STRIPE_WEBHOOK);
+describe("the payment-side NAME_TO_TYPE stays in sync", () => {
+  const { path, source } = findNameToTypeSource();
 
   it("derives NAME_TO_TYPE from NAME_MAP rather than hardcoding it", () => {
-    // Today the webhook inverts NAME_MAP via Object.fromEntries, so it cannot
-    // drift. This test locks that in: if someone replaces the derivation with
-    // a literal, this fails and the literal-comparison test below takes over.
-    expect(source).toMatch(/import\s*\{[^}]*\bNAME_MAP\b[^}]*\}\s*from\s*["']@\/lib\/document-generation["']/);
+    // Today it inverts NAME_MAP via Object.fromEntries, so it cannot drift.
+    // This test locks that in: if someone replaces the derivation with a
+    // literal, this fails and the literal-comparison test below takes over.
+    expect(source, `${path} should import NAME_MAP`).toMatch(
+      /import\s*(?:type\s*)?\{[^}]*\bNAME_MAP\b[^}]*\}\s*from\s*["'][^"']*document-generation["']/
+    );
     expect(source).toMatch(/NAME_TO_TYPE[\s\S]{0,200}Object\.entries\(NAME_MAP\)/);
   });
 
@@ -132,12 +161,12 @@ describe("all three maps agree", () => {
   it("round-trips type → name → type for every document type", () => {
     const viewer = parseStringMap(read(DOC_VIEWER), "DOC_NAME_TO_TYPE")!;
     // null ⇒ derived from NAME_MAP, so it is correct by construction.
-    const webhook =
-      parseStringMap(read(STRIPE_WEBHOOK), "NAME_TO_TYPE") ?? invert(NAME_MAP!);
+    const { path, source } = findNameToTypeSource();
+    const paymentSide = parseStringMap(source, "NAME_TO_TYPE") ?? invert(NAME_MAP!);
 
     for (const [type, name] of Object.entries(NAME_MAP!)) {
       expect(viewer[name], `doc-viewer is missing "${name}"`).toBe(type);
-      expect(webhook[name], `stripe webhook is missing "${name}"`).toBe(type);
+      expect(paymentSide[name], `${path} is missing "${name}"`).toBe(type);
     }
   });
 });

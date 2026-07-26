@@ -4,13 +4,20 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { DocViewer } from "@/components/documents/doc-viewer";
+import { PayToGenerateCard } from "@/components/billing/pay-to-generate-card";
 import type { Document } from "@/types";
 import type { StageDocConfig } from "@/lib/stage-config";
-import { Lock, FileText, Loader2, AlertCircle } from "lucide-react";
+import type { StagePaymentGate } from "@/lib/billing/payment-required";
+import { Lock, FileText, Loader2, AlertCircle, CreditCard } from "lucide-react";
 
 interface StageAiDocsProps {
   docConfigs: StageDocConfig[];
   documents: Document[];
+  /**
+   * Set when this stage's fee is unpaid. Generation cannot run, so we replace
+   * the "Generating..." badge with a blocking pay card and stop polling.
+   */
+  paymentGate?: StagePaymentGate | null;
 }
 
 function isGenerating(doc: Document): boolean {
@@ -20,7 +27,15 @@ function isGenerating(doc: Document): boolean {
   );
 }
 
-function StatusBadge({ doc }: { doc: Document }) {
+function StatusBadge({ doc, gated }: { doc: Document; gated: boolean }) {
+  if (gated && isGenerating(doc)) {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+        <CreditCard className="h-3 w-3" />
+        Payment required
+      </span>
+    );
+  }
   if (isGenerating(doc)) {
     return (
       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-600 border border-amber-200">
@@ -56,14 +71,20 @@ function StatusBadge({ doc }: { doc: Document }) {
   return null;
 }
 
-export function StageAiDocs({ docConfigs, documents }: StageAiDocsProps) {
+export function StageAiDocs({
+  docConfigs,
+  documents,
+  paymentGate,
+}: StageAiDocsProps) {
   const router = useRouter();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [viewingDoc, setViewingDoc] = useState<Document | null>(null);
 
-  const anyGenerating = documents.some(
-    (d) => d.type === "generated" && isGenerating(d)
-  );
+  const gated = !!paymentGate;
+  // Never poll for a document that is gated on payment — nothing is generating.
+  const anyGenerating =
+    !gated &&
+    documents.some((d) => d.type === "generated" && isGenerating(d));
 
   useEffect(() => {
     if (!anyGenerating) return;
@@ -81,6 +102,13 @@ export function StageAiDocs({ docConfigs, documents }: StageAiDocsProps) {
 
   return (
     <div className="mb-4">
+      {paymentGate && (
+        <PayToGenerateCard
+          caseId={paymentGate.caseId}
+          stage={paymentGate.stage}
+          amount={paymentGate.amount}
+        />
+      )}
       <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2.5">
         AI-Generated Documents
       </h3>
@@ -92,7 +120,10 @@ export function StageAiDocs({ docConfigs, documents }: StageAiDocsProps) {
         );
         const isLocked = cfg.locked && !doc;
         const isExpanded = expandedId === cfg.id;
-        const generating = doc ? isGenerating(doc) : false;
+        const pendingGeneration = doc ? isGenerating(doc) : false;
+        // When the stage fee is unpaid there is no in-flight generation to show.
+        const generating = pendingGeneration && !gated;
+        const awaitingPayment = pendingGeneration && gated;
         const failed = doc?.generation_status === "failed";
 
         return (
@@ -108,8 +139,10 @@ export function StageAiDocs({ docConfigs, documents }: StageAiDocsProps) {
                   className={`w-[34px] h-[34px] rounded-lg flex items-center justify-center ${
                     isLocked
                       ? "bg-gray-100"
-                      : generating
-                        ? "bg-amber-50"
+                      : awaitingPayment
+                        ? "bg-amber-100"
+                        : generating
+                          ? "bg-amber-50"
                         : failed
                           ? "bg-red-50"
                           : "bg-blue-50"
@@ -117,6 +150,8 @@ export function StageAiDocs({ docConfigs, documents }: StageAiDocsProps) {
                 >
                   {isLocked ? (
                     <Lock className="h-4 w-4 text-gray-400" />
+                  ) : awaitingPayment ? (
+                    <CreditCard className="h-4 w-4 text-amber-700" />
                   ) : generating ? (
                     <Loader2 className="h-4 w-4 text-amber-600 animate-spin" />
                   ) : failed ? (
@@ -132,7 +167,9 @@ export function StageAiDocs({ docConfigs, documents }: StageAiDocsProps) {
                   <div className="text-[11px] text-gray-400 mt-0.5">
                     {isLocked
                       ? "Will be generated when requirements are met"
-                      : generating
+                      : awaitingPayment
+                        ? "Not started — pay the stage fee above to begin"
+                        : generating
                         ? `Generating ${cfg.name} — usually 10–30 seconds${cfg.name.includes("Memo") ? ", up to a minute" : ""}`
                         : failed
                           ? "Generation failed — open to retry"
@@ -143,8 +180,8 @@ export function StageAiDocs({ docConfigs, documents }: StageAiDocsProps) {
                 </div>
               </div>
               <div className="flex gap-1.5 items-center">
-                {doc && <StatusBadge doc={doc} />}
-                {!isLocked && doc && !generating && (
+                {doc && <StatusBadge doc={doc} gated={gated} />}
+                {!isLocked && doc && !generating && !awaitingPayment && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -162,7 +199,7 @@ export function StageAiDocs({ docConfigs, documents }: StageAiDocsProps) {
             </div>
 
             {/* Expanded preview */}
-            {isExpanded && doc && !generating && !failed && (
+            {isExpanded && doc && !generating && !awaitingPayment && !failed && (
               <div className="px-5 pb-4 pt-0 bg-gray-50 border-t border-gray-100">
                 <p className="text-sm text-foreground leading-relaxed mt-3 line-clamp-4 font-serif">
                   {doc.content?.substring(0, 300)}...

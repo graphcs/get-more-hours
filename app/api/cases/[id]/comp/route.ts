@@ -1,18 +1,17 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { compSchema } from "@/lib/validations";
-import { PRICING } from "@/lib/constants";
-
-const STAGE_AMOUNTS: Record<number, number> = {
-  1: PRICING.stage1,
-  2: PRICING.stage2,
-  3: PRICING.stage3,
-};
+import { markStagePaid } from "@/lib/billing/stage-payment";
 
 // Admin-only: comp (mark paid) or un-comp (revert to pending) a stage fee for a
 // case, without a Stripe payment. The stage payment gate (lib/billing/guard.ts)
 // reads purely from the billing table, so a paid stage_fee row unlocks the
 // stage exactly like a Stripe-webhook-created one.
+//
+// Comping goes through markStagePaid() so it *also* kicks off document
+// generation. Previously it only wrote the billing row: the gate opened but no
+// work ever started, and the client watched a "GENERATING" spinner forever
+// while the admin UI showed "paid". Do not reintroduce a bare billing write.
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -77,29 +76,17 @@ export async function POST(
   }
 
   // action === "comp"
-  if (existing) {
-    const { error } = await supabase
-      .from("billing")
-      .update({ status: "paid", stripe_event: { manual_comp: true, admin_id: user.id } })
-      .eq("id", existing.id);
-    if (error) {
-      console.error("Comp update failed:", error);
-      return NextResponse.json({ error: "Failed to comp stage" }, { status: 500 });
-    }
-    return NextResponse.json({ ok: true, status: "paid" });
-  }
-
-  const { error } = await supabase.from("billing").insert({
-    case_id: id,
+  const result = await markStagePaid({
+    client: supabase,
+    caseId: id,
     stage,
-    amount: STAGE_AMOUNTS[stage],
-    type: "stage_fee",
-    status: "paid",
-    stripe_event: { manual_comp: true, admin_id: user.id },
+    stripeEvent: { manual_comp: true, admin_id: user.id },
   });
-  if (error) {
-    console.error("Comp insert failed:", error);
+
+  if (!result.ok) {
+    console.error("Comp failed:", result.error);
     return NextResponse.json({ error: "Failed to comp stage" }, { status: 500 });
   }
+
   return NextResponse.json({ ok: true, status: "paid" });
 }

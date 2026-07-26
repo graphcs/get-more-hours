@@ -3,6 +3,11 @@
 import { useState, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Upload, Loader2, Check, X } from "lucide-react";
+import { PaymentRequiredNotice } from "@/components/billing/payment-required-notice";
+import {
+  paymentRequiredFrom,
+  type PaymentRequiredInfo,
+} from "@/lib/billing/payment-required";
 
 interface FileUploadProps {
   caseId: string;
@@ -22,6 +27,7 @@ export function FileUpload({
   const [uploading, setUploading] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
+  const [blocked, setBlocked] = useState<PaymentRequiredInfo | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [fileName, setFileName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -29,6 +35,7 @@ export function FileUpload({
   const handleFile = useCallback(
     async (file: File) => {
       setError("");
+      setBlocked(null);
       setUploading(true);
       setFileName(file.name);
 
@@ -47,11 +54,14 @@ export function FileUpload({
         const result = await res.json();
 
         if (!res.ok) {
-          setError(
-            res.status === 402
-              ? "This stage isn't unlocked yet — pay the stage fee on the Billing page to continue."
-              : result.error || "Upload failed"
-          );
+          // Consume the guard's `redirectUrl` so the user gets a real "Pay now"
+          // link instead of prose telling them to go find the Billing page.
+          const gate = paymentRequiredFrom(res, result);
+          if (gate) {
+            setBlocked(gate);
+          } else {
+            setError(result.error || "Upload failed");
+          }
           setUploading(false);
           return;
         }
@@ -116,6 +126,9 @@ export function FileUpload({
           {uploading ? "Uploading..." : "Upload"}
         </Button>
         {error && <p className="text-xs text-destructive mt-1">{error}</p>}
+        {blocked && (
+          <PaymentRequiredNotice info={blocked} size="sm" className="mt-2" />
+        )}
       </div>
     );
   }
@@ -168,6 +181,7 @@ export function FileUpload({
           {error}
         </div>
       )}
+      {blocked && <PaymentRequiredNotice info={blocked} className="mt-2" />}
     </div>
   );
 }

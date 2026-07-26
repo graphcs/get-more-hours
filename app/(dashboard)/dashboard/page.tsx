@@ -9,6 +9,7 @@ import { CaseSummary } from "@/components/dashboard/case-summary";
 import { Timeline } from "@/components/dashboard/timeline";
 import { WhiteGloveUpsell } from "@/components/dashboard/white-glove-upsell";
 import { PaymentSuccessToast } from "@/components/dashboard/payment-success-toast";
+import { getStagePaymentGate } from "@/lib/billing/stage-payment";
 import { Suspense } from "react";
 import { FileText, ArrowRight } from "lucide-react";
 import type { Case, Document } from "@/types";
@@ -82,6 +83,14 @@ export default async function DashboardPage() {
   const typedCase = caseData as Case;
   const typedDocs = (documents || []) as Document[];
 
+  // If the current stage's fee is unpaid, nothing is generating and nothing
+  // will — show a blocking pay card instead of a spinner that never resolves.
+  const paymentGate = await getStagePaymentGate(
+    supabase,
+    typedCase,
+    typedCase.current_stage
+  );
+
   return (
     <div className="max-w-5xl">
       <Suspense>
@@ -107,11 +116,13 @@ export default async function DashboardPage() {
           <NextSteps
             documents={typedDocs}
             currentStage={typedCase.current_stage}
+            paymentGate={paymentGate}
           />
           <DocumentsList
             documents={typedDocs}
             caseId={typedCase.id}
             currentStage={typedCase.current_stage}
+            paymentGated={!!paymentGate}
           />
         </div>
 

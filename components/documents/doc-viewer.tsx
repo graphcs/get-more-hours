@@ -15,6 +15,11 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { describeAiError } from "@/lib/ai-errors";
+import { PaymentRequiredNotice } from "@/components/billing/payment-required-notice";
+import {
+  paymentRequiredFrom,
+  type PaymentRequiredInfo,
+} from "@/lib/billing/payment-required";
 import type { Document } from "@/types";
 
 interface DocViewerProps {
@@ -123,6 +128,7 @@ export function DocViewer({
   const [showRight, setShowRight] = useState(true);
   const [doc, setDoc] = useState(document);
   const [retrying, setRetrying] = useState(false);
+  const [blocked, setBlocked] = useState<PaymentRequiredInfo | null>(null);
 
   const derived = deriveStatus(doc);
   const polling = isNonTerminal(doc);
@@ -141,7 +147,16 @@ export function DocViewer({
       });
       if (res.ok) {
         setDoc({ ...doc, status: "reviewed" });
+        setBlocked(null);
+        return;
       }
+      const body = await res.json().catch(() => ({}));
+      const gate = paymentRequiredFrom(res, body);
+      if (gate) {
+        setBlocked(gate);
+        return;
+      }
+      toast.error(body.error || "Could not approve this document");
     } catch (err) {
       console.error("Mark reviewed error:", err);
     }
@@ -204,8 +219,15 @@ export function DocViewer({
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
+        const gate = paymentRequiredFrom(res, body);
+        if (gate) {
+          setBlocked(gate);
+          setDoc((prev) => ({ ...prev, generation_status: "pending" }));
+          return;
+        }
         throw new Error(body.error || "Retry failed");
       }
+      setBlocked(null);
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "Retry failed"
@@ -273,6 +295,12 @@ export function DocViewer({
           </Button>
         </div>
       </div>
+
+      {blocked && (
+        <div className="shrink-0 border-b border-amber-200 px-5 py-3">
+          <PaymentRequiredNotice info={blocked} />
+        </div>
+      )}
 
       {/* Content area */}
       <div className="flex-1 flex overflow-hidden">

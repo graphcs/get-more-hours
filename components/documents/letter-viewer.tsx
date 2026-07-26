@@ -6,6 +6,12 @@ import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import { PaymentRequiredNotice } from "@/components/billing/payment-required-notice";
+import {
+  paymentRequiredFrom,
+  type PaymentRequiredInfo,
+} from "@/lib/billing/payment-required";
 
 interface LetterViewerProps {
   content: string;
@@ -21,6 +27,7 @@ export function LetterViewer({
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
   const [saving, setSaving] = useState(false);
+  const [blocked, setBlocked] = useState<PaymentRequiredInfo | null>(null);
 
   const wordCount = editContent
     .split(/\s+/)
@@ -28,6 +35,7 @@ export function LetterViewer({
 
   const handleSave = async () => {
     setSaving(true);
+    setBlocked(null);
     try {
       const res = await fetch(`/api/documents/${documentId}`, {
         method: "PUT",
@@ -38,9 +46,19 @@ export function LetterViewer({
       if (res.ok) {
         setEditing(false);
         onContentSaved?.(editContent);
+        return;
       }
+
+      const body = await res.json().catch(() => ({}));
+      const gate = paymentRequiredFrom(res, body);
+      if (gate) {
+        setBlocked(gate);
+        return;
+      }
+      toast.error(body.error || "Could not save your changes");
     } catch (err) {
       console.error("Save error:", err);
+      toast.error("Could not save your changes");
     } finally {
       setSaving(false);
     }
@@ -48,6 +66,11 @@ export function LetterViewer({
 
   return (
     <div className="flex-1 flex flex-col min-w-0">
+      {blocked && (
+        <div className="px-4 pt-3">
+          <PaymentRequiredNotice info={blocked} />
+        </div>
+      )}
       {/* Toolbar */}
       <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200">
         <div className="flex gap-1">

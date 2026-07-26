@@ -7,6 +7,7 @@ import { StageUploads } from "@/components/dashboard/stage-uploads";
 import { StageTimeline } from "@/components/dashboard/stage-timeline";
 import { NextStageInfo } from "@/components/dashboard/next-stage-info";
 import { WhiteGloveUpsell } from "@/components/dashboard/white-glove-upsell";
+import { getStagePaymentGate } from "@/lib/billing/stage-payment";
 import { Sparkles, Check } from "lucide-react";
 import type { Case, Document, StageNumber } from "@/types";
 
@@ -49,6 +50,10 @@ export default async function StageDetailPage({
     (d) => d.stage === stageNum
   );
 
+  // Unpaid stage fee => documents for this stage cannot generate. Surface the
+  // blocking pay card rather than a perpetual "Generating..." badge.
+  const paymentGate = await getStagePaymentGate(supabase, typedCase, stageNum);
+
   const config = STAGE_CONFIG[stageNum];
   const isActive = typedCase.current_stage === stageNum;
   const isCompleted = typedCase.current_stage > stageNum;
@@ -67,6 +72,7 @@ export default async function StageDetailPage({
           <StageAiDocs
             docConfigs={config.docs}
             documents={stageDocs}
+            paymentGate={paymentGate}
           />
 
           <StageUploads

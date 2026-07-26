@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { intakeSchema } from "@/lib/validations";
+import { ensureStageFeeRow } from "@/lib/billing/stage-payment";
+import { createCheckoutSession } from "@/lib/stripe";
 
 export async function POST(req: Request) {
   try {
@@ -92,14 +94,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // Create billing record for Stage 1
-    await supabase.from("billing").insert({
-      case_id: newCase.id,
-      stage: 1,
-      amount: 9900, // $99 in cents
-      type: "stage_fee",
-      status: "pending",
-    });
+    // Create the pending Stage 1 fee row (amount comes from PRICING).
+    await ensureStageFeeRow(supabase, newCase.id, 1);
 
     // Update profile name if needed
     await supabase
@@ -148,15 +144,41 @@ export async function POST(req: Request) {
       );
     }
 
-    // Stage 1 document generation is deferred until the Stage 1 fee is paid.
-    // The Stripe webhook (app/api/stripe/webhook/route.ts) triggers
-    // runDocumentGeneration on checkout.session.completed for the stage_fee.
+    // Stage 1 document generation is deferred until the Stage 1 fee is paid —
+    // markStagePaid() (lib/billing/stage-payment.ts) triggers it from both the
+    // Stripe webhook and the admin comp route.
+    //
+    // Send the client straight into Stripe Checkout so they are actually asked
+    // to pay. Previously intake ended here, leaving two `pending` placeholder
+    // documents that the dashboard polled forever behind a "GENERATING" badge
+    // with no payment prompt anywhere.
+    let checkoutUrl: string | null = null;
+    try {
+      const baseUrl =
+        process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+      const session = await createCheckoutSession({
+        caseId: newCase.id,
+        caseNumber: newCase.case_number,
+        stage: 1,
+        includeWhiteGlove: false,
+        customerEmail: body.email || user.email || "",
+        successUrl: `${baseUrl}/dashboard?payment=success&stage=1`,
+        // Abandoning payment must not lose the case — land on Billing with the
+        // Stage 1 card highlighted so paying is one click away.
+        cancelUrl: `${baseUrl}/dashboard/billing?stage=1`,
+      });
+      checkoutUrl = session.url;
+    } catch (err) {
+      // The case is saved either way; the client can pay from /dashboard/billing.
+      console.error("Intake checkout session creation failed:", err);
+    }
 
     return NextResponse.json(
       {
         message: "Case created successfully",
         caseId: newCase.id,
         caseNumber: newCase.case_number,
+        checkoutUrl,
       },
       { status: 201 }
     );

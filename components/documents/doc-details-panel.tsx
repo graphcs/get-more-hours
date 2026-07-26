@@ -7,6 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, RotateCcw } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { PaymentRequiredNotice } from "@/components/billing/payment-required-notice";
+import {
+  paymentRequiredFrom,
+  type PaymentRequiredInfo,
+} from "@/lib/billing/payment-required";
 import type { Document, DocumentVersion, DocumentComment } from "@/types";
 
 interface DocDetailsPanelProps {
@@ -248,6 +253,7 @@ function CommentsTab({ documentId }: { documentId: string }) {
   const [newComment, setNewComment] = useState("");
   const [posting, setPosting] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [blocked, setBlocked] = useState<PaymentRequiredInfo | null>(null);
 
   useEffect(() => {
     fetch(`/api/documents/${documentId}/comments`)
@@ -262,6 +268,7 @@ function CommentsTab({ documentId }: { documentId: string }) {
   const handlePost = async () => {
     if (!newComment.trim()) return;
     setPosting(true);
+    setBlocked(null);
     try {
       const res = await fetch(`/api/documents/${documentId}/comments`, {
         method: "POST",
@@ -272,9 +279,18 @@ function CommentsTab({ documentId }: { documentId: string }) {
         const data = await res.json();
         setComments((prev) => [...prev, data.comment]);
         setNewComment("");
+        return;
       }
+      const body = await res.json().catch(() => ({}));
+      const gate = paymentRequiredFrom(res, body);
+      if (gate) {
+        setBlocked(gate);
+        return;
+      }
+      toast.error(body.error || "Could not post your comment");
     } catch (err) {
       console.error("Comment error:", err);
+      toast.error("Could not post your comment");
     } finally {
       setPosting(false);
     }
@@ -328,6 +344,7 @@ function CommentsTab({ documentId }: { documentId: string }) {
       )}
 
       <div className="border-t border-gray-200 pt-3.5">
+        {blocked && <PaymentRequiredNotice info={blocked} className="mb-3" />}
         <Textarea
           placeholder="Add a comment..."
           rows={3}
@@ -351,6 +368,7 @@ function HistoryTab({ documentId }: { documentId: string }) {
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [loading, setLoading] = useState(true);
   const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [blocked, setBlocked] = useState<PaymentRequiredInfo | null>(null);
 
   useEffect(() => {
     fetch(`/api/documents/${documentId}`)
@@ -364,6 +382,7 @@ function HistoryTab({ documentId }: { documentId: string }) {
 
   async function handleRestore(versionId: string, versionNum: number) {
     setRestoringId(versionId);
+    setBlocked(null);
     try {
       const res = await fetch(
         `/api/documents/${documentId}/versions/${versionId}/restore`,
@@ -371,6 +390,11 @@ function HistoryTab({ documentId }: { documentId: string }) {
       );
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
+        const gate = paymentRequiredFrom(res, body);
+        if (gate) {
+          setBlocked(gate);
+          return;
+        }
         throw new Error(body.error || "Restore failed");
       }
       toast.success(`Restored v${versionNum}`);
@@ -406,6 +430,11 @@ function HistoryTab({ documentId }: { documentId: string }) {
 
   return (
     <div className="relative pl-5">
+      {blocked && (
+        <div className="-ml-5 mb-4">
+          <PaymentRequiredNotice info={blocked} />
+        </div>
+      )}
       <div className="absolute left-[5px] top-1 bottom-1 w-0.5 bg-gray-200" />
       {versions.map((v, i) => (
         <div

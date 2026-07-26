@@ -80,7 +80,12 @@ function ProgressBar({ step }: { step: number }) {
   );
 }
 
-function SuccessScreen() {
+/**
+ * Shown while we hand off to Stripe Checkout, and as the fallback when the
+ * Checkout session could not be created. The intake itself is already saved at
+ * this point either way — the case is never lost by abandoning payment.
+ */
+function SuccessScreen({ redirecting }: { redirecting: boolean }) {
   const router = useRouter();
 
   return (
@@ -89,17 +94,17 @@ function SuccessScreen() {
         <Check className="h-8 w-8 text-emerald-600" />
       </div>
       <h2 className="text-2xl font-bold text-foreground mb-2.5">
-        You&apos;re all set!
+        Your case is saved
       </h2>
-      <p className="text-base text-gray-500 leading-relaxed max-w-[420px] mx-auto mb-8">
-        Your intake is complete. We&apos;re now preparing your Request for
-        Increase letter and your doctor&apos;s LOMN template. You&apos;ll see
-        them on your dashboard shortly.
+      <p className="text-base text-gray-500 leading-relaxed max-w-[440px] mx-auto mb-8">
+        {redirecting
+          ? "Taking you to secure checkout — the $99 Stage 1 fee is what starts your Request for Increase letter and your doctor's LOMN template."
+          : "We couldn't open checkout just now, but nothing is lost. Pay the $99 Stage 1 fee from your billing page and we'll start writing your letters immediately."}
       </p>
       <div className="inline-flex flex-col gap-2.5 items-start text-left mb-9">
         {[
-          "AI-generated request letter — in progress",
-          "LOMN template for your doctor — in progress",
+          "AI-generated Request for Increase letter",
+          "LOMN template for your doctor",
         ].map((t) => (
           <div
             key={t}
@@ -110,8 +115,25 @@ function SuccessScreen() {
           </div>
         ))}
       </div>
-      <div>
-        <Button size="lg" onClick={() => router.push("/dashboard")}>
+      <div className="flex flex-col items-center gap-3">
+        {redirecting ? (
+          <div className="flex items-center gap-2 text-sm text-gray-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Redirecting to checkout…
+          </div>
+        ) : (
+          <Button
+            size="lg"
+            onClick={() => router.push("/dashboard/billing?stage=1")}
+          >
+            Pay $99 & start my letters
+          </Button>
+        )}
+        <Button
+          variant="outline"
+          size="lg"
+          onClick={() => router.push("/dashboard")}
+        >
           Go to My Dashboard
         </Button>
       </div>
@@ -122,6 +144,7 @@ function SuccessScreen() {
 export function IntakeForm() {
   const [step, setStep] = useState(0);
   const [done, setDone] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [data, setData] = useState<IntakeFormData>(initialData);
@@ -164,7 +187,17 @@ export function IntakeForm() {
         return;
       }
 
+      // Mark done first so any draft-persistence cleanup keyed off completion
+      // still runs before we navigate away to Stripe (see PR 2).
       setDone(true);
+
+      // Send the client straight into Stripe Checkout for the $99 Stage 1 fee.
+      // Generation only ever starts on payment, so ending intake without asking
+      // for payment is what left clients staring at a "GENERATING" spinner.
+      if (typeof result.checkoutUrl === "string" && result.checkoutUrl) {
+        setRedirecting(true);
+        window.location.href = result.checkoutUrl;
+      }
     } catch {
       setError("Something went wrong. Please try again.");
       setSubmitting(false);
@@ -172,7 +205,7 @@ export function IntakeForm() {
   };
 
   if (done) {
-    return <SuccessScreen />;
+    return <SuccessScreen redirecting={redirecting} />;
   }
 
   return (

@@ -1,12 +1,10 @@
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
-import { PRICING } from "@/lib/constants";
 import {
-  NAME_MAP,
-  runDocumentGeneration,
-  type DocumentType,
-} from "@/lib/document-generation";
+  markStagePaid,
+  recordWhiteGloveUpgrade,
+} from "@/lib/billing/stage-payment";
 import type Stripe from "stripe";
 
 export async function POST(req: Request) {
@@ -68,19 +66,12 @@ export async function POST(req: Request) {
 
       // Standalone white-glove upgrade (no stage fee component).
       if (type === "white_glove_standalone") {
-        await serviceClient.from("billing").insert({
-          case_id: caseId,
-          stage: 1,
-          amount: PRICING.whiteGlove,
-          type: "white_glove",
-          status: "paid",
-          stripe_payment_id: session.payment_intent as string,
-          stripe_event: rawEvent,
+        await recordWhiteGloveUpgrade({
+          client: serviceClient,
+          caseId,
+          stripePaymentId: session.payment_intent as string,
+          stripeEvent: rawEvent,
         });
-        await serviceClient
-          .from("cases")
-          .update({ tier: "white_glove" })
-          .eq("id", caseId);
         break;
       }
 
@@ -91,60 +82,34 @@ export async function POST(req: Request) {
 
       const stageNum = parseInt(stage, 10);
 
-      // Update or insert billing record for the stage fee
-      const { data: existingBilling } = await serviceClient
-        .from("billing")
-        .select("id")
-        .eq("case_id", caseId)
-        .eq("stage", stageNum)
-        .eq("type", "stage_fee")
-        .maybeSingle();
-
-      if (existingBilling) {
+      // markStagePaid writes the billing row AND schedules generation for the
+      // stage. Never split those two apart — see lib/billing/stage-payment.ts.
+      const paid = await markStagePaid({
+        client: serviceClient,
+        caseId,
+        stage: stageNum,
+        stripePaymentId: session.payment_intent as string,
+        stripeEvent: rawEvent,
+      });
+      if (!paid.ok) {
+        // Return non-2xx so Stripe retries; the event-id claim is rolled back
+        // below so the retry isn't deduplicated away.
         await serviceClient
-          .from("billing")
-          .update({
-            status: "paid",
-            stripe_payment_id: session.payment_intent as string,
-            stripe_event: rawEvent,
-          })
-          .eq("id", existingBilling.id);
-      } else {
-        const STAGE_AMOUNTS: Record<number, number> = {
-          1: PRICING.stage1,
-          2: PRICING.stage2,
-          3: PRICING.stage3,
-        };
-        await serviceClient.from("billing").insert({
-          case_id: caseId,
-          stage: stageNum,
-          amount: STAGE_AMOUNTS[stageNum] || 0,
-          type: "stage_fee",
-          status: "paid",
-          stripe_payment_id: session.payment_intent as string,
-          stripe_event: rawEvent,
-        });
+          .from("stripe_events")
+          .delete()
+          .eq("event_id", event.id);
+        return NextResponse.json({ error: paid.error }, { status: 500 });
       }
-
-      // Schedule generation for any pending placeholder documents at this stage.
-      after(() => triggerStageGeneration(caseId, stageNum));
 
       // Handle White Glove add-on bundled with stage fee.
       if (includeWhiteGlove === "true") {
-        await serviceClient.from("billing").insert({
-          case_id: caseId,
+        await recordWhiteGloveUpgrade({
+          client: serviceClient,
+          caseId,
           stage: stageNum,
-          amount: PRICING.whiteGlove,
-          type: "white_glove",
-          status: "paid",
-          stripe_payment_id: session.payment_intent as string,
-          stripe_event: rawEvent,
+          stripePaymentId: session.payment_intent as string,
+          stripeEvent: rawEvent,
         });
-
-        await serviceClient
-          .from("cases")
-          .update({ tier: "white_glove" })
-          .eq("id", caseId);
       }
       break;
     }
@@ -203,40 +168,4 @@ export async function POST(req: Request) {
   }
 
   return NextResponse.json({ received: true });
-}
-
-const NAME_TO_TYPE: Record<string, DocumentType> = Object.fromEntries(
-  Object.entries(NAME_MAP).map(([type, name]) => [name, type as DocumentType])
-);
-
-// Looks up placeholder documents at the given (case, stage) whose generation
-// hasn't completed yet, and runs generation for any whose name matches a known
-// document type. Stage 1 placeholders are created at intake; Stage 2/3 are
-// usually created by the OCR auto-detect flow — this catches both paths.
-async function triggerStageGeneration(caseId: string, stage: number) {
-  const client = await createServiceClient();
-  const { data: docs, error } = await client
-    .from("documents")
-    .select("id, name, generation_status")
-    .eq("case_id", caseId)
-    .eq("stage", stage)
-    .eq("type", "generated")
-    .neq("generation_status", "ready");
-
-  if (error) {
-    console.error("triggerStageGeneration: lookup failed", error);
-    return;
-  }
-
-  const jobs: Promise<void>[] = [];
-  for (const d of docs || []) {
-    const documentType = NAME_TO_TYPE[d.name as string];
-    if (!documentType) continue;
-    jobs.push(
-      runDocumentGeneration({ caseId, documentType, documentId: d.id as string })
-    );
-  }
-  // allSettled so one failed generation doesn't drop sibling generations;
-  // runDocumentGeneration records failed status internally on throw.
-  await Promise.allSettled(jobs);
 }
