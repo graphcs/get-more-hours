@@ -132,6 +132,9 @@ export default async function DashboardPage() {
           <Timeline
             documents={typedDocs}
             caseCreatedAt={typedCase.created_at}
+            stageStatus={typedCase.stage_status}
+            currentStage={typedCase.current_stage}
+            paymentGate={paymentGate}
           />
           {typedCase.tier !== "white_glove" && (
             <WhiteGloveUpsell caseId={typedCase.id} />

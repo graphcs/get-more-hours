@@ -1,86 +1,54 @@
-import type { Document } from "@/types";
+import { deriveTimeline, type TimelineState } from "@/lib/timeline";
+import type { Document, StageStatus } from "@/types";
+import type { StagePaymentGate } from "@/lib/billing/payment-required";
 
 interface TimelineProps {
   documents: Document[];
   caseCreatedAt: string;
+  stageStatus?: StageStatus;
+  currentStage?: number;
+  /** Unpaid stage fee, if any — a pending document is blocked, not in flight. */
+  paymentGate?: StagePaymentGate | null;
 }
 
-interface TimelineEntry {
-  date: string;
-  text: string;
-  done: boolean;
-}
+const DOT_CLASSES: Record<TimelineState, string> = {
+  done: "bg-emerald-600 border-emerald-200",
+  in_progress: "bg-amber-500 border-amber-200",
+  blocked: "bg-amber-500 border-amber-200",
+  failed: "bg-red-500 border-red-200",
+  upcoming: "bg-gray-300 border-gray-200",
+};
 
-function deriveTimeline(
-  documents: Document[],
-  caseCreatedAt: string
-): TimelineEntry[] {
-  const entries: TimelineEntry[] = [];
-  const fmt = (d: string) =>
-    new Date(d).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-    });
+const CAPTION_CLASSES: Record<TimelineState, string> = {
+  done: "text-gray-500",
+  in_progress: "text-amber-600",
+  blocked: "text-amber-600",
+  failed: "text-red-600",
+  upcoming: "text-gray-400",
+};
 
-  entries.push({
-    date: fmt(caseCreatedAt),
-    text: "Intake completed",
-    done: true,
+const TEXT_CLASSES: Record<TimelineState, string> = {
+  done: "text-foreground",
+  in_progress: "text-gray-600",
+  blocked: "text-gray-600",
+  failed: "text-red-600",
+  upcoming: "text-gray-400 italic",
+};
+
+export function Timeline({
+  documents,
+  caseCreatedAt,
+  stageStatus,
+  currentStage,
+  paymentGate,
+}: TimelineProps) {
+  const entries = deriveTimeline({
+    documents,
+    caseCreatedAt,
+    stageStatus,
+    currentStage,
+    paymentGate,
   });
-
-  const requestLetter = documents.find(
-    (d) => d.type === "generated" && d.name.includes("Request for Increase")
-  );
-  if (requestLetter) {
-    entries.push({
-      date: fmt(requestLetter.created_at),
-      text: "Request letter generated",
-      done: true,
-    });
-  }
-
-  const lomnTemplate = documents.find(
-    (d) => d.type === "generated" && d.name.includes("LOMN")
-  );
-  if (lomnTemplate) {
-    entries.push({
-      date: fmt(lomnTemplate.created_at),
-      text: "LOMN template generated",
-      done: true,
-    });
-  }
-
-  const uploadedDocs = documents.filter((d) => d.type === "uploaded");
-  uploadedDocs.forEach((d) => {
-    entries.push({
-      date: fmt(d.created_at),
-      text: `${d.name} uploaded`,
-      done: true,
-    });
-  });
-
-  // Future steps
-  if (!uploadedDocs.some((d) => d.name.toLowerCase().includes("lomn"))) {
-    entries.push({ date: "Pending", text: "Upload signed LOMN", done: false });
-  }
-
-  entries.push({
-    date: "—",
-    text: "Finalize & submit to MLTC",
-    done: false,
-  });
-
-  entries.push({
-    date: "—",
-    text: "Await MLTC determination (2–4 wks)",
-    done: false,
-  });
-
-  return entries;
-}
-
-export function Timeline({ documents, caseCreatedAt }: TimelineProps) {
-  const entries = deriveTimeline(documents, caseCreatedAt);
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-5 px-6 shadow-sm mb-4">
@@ -95,26 +63,14 @@ export function Timeline({ documents, caseCreatedAt }: TimelineProps) {
             className={`relative ${i < entries.length - 1 ? "mb-3.5" : ""}`}
           >
             <div
-              className={`w-[11px] h-[11px] rounded-full absolute -left-5 top-[3px] border-2 ${
-                t.done
-                  ? "bg-emerald-600 border-emerald-200"
-                  : "bg-gray-300 border-gray-200"
-              }`}
+              className={`w-[11px] h-[11px] rounded-full absolute -left-5 top-[3px] border-2 ${DOT_CLASSES[t.state]}`}
             />
             <div
-              className={`text-[10px] font-semibold mb-0.5 ${
-                t.done ? "text-gray-500" : "text-gray-400"
-              }`}
+              className={`text-[10px] font-semibold mb-0.5 ${CAPTION_CLASSES[t.state]}`}
             >
               {t.date}
             </div>
-            <div
-              className={`text-xs ${
-                t.done ? "text-foreground" : "text-gray-400 italic"
-              }`}
-            >
-              {t.text}
-            </div>
+            <div className={`text-xs ${TEXT_CLASSES[t.state]}`}>{t.text}</div>
           </div>
         ))}
       </div>

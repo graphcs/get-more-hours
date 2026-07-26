@@ -91,6 +91,9 @@ export default async function StageDetailPage({
             steps={config.timeline}
             documents={stageDocs}
             stageNum={stageNum}
+            currentStage={typedCase.current_stage}
+            stageStatus={typedCase.stage_status}
+            paymentGate={paymentGate}
           />
 
           {/* White Glove upsell with stage-specific features */}
