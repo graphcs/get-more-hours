@@ -14,7 +14,14 @@ import {
   RotateCw,
 } from "lucide-react";
 import { toast } from "sonner";
-import { describeAiError } from "@/lib/ai-errors";
+import {
+  aiErrorInfoForCode,
+  describeAiError,
+  isCreditsError,
+  stripAiErrorTag,
+} from "@/lib/ai-errors";
+import { MAX_POLL_ATTEMPTS, POLL_INTERVAL_MS } from "@/lib/ai-limits";
+import { AiCreditsModal } from "./ai-credits-modal";
 import { PaymentRequiredNotice } from "@/components/billing/payment-required-notice";
 import {
   paymentRequiredFrom,
@@ -31,6 +38,8 @@ interface DocViewerProps {
 
 type DerivedStatus =
   | "generating"
+  /** Still non-terminal after the polling cap — treated as recoverable. */
+  | "stalled"
   | "failed"
   | "review_needed"
   | "ready"
@@ -72,11 +81,11 @@ function StatusBadge({ status }: { status: DerivedStatus }) {
       </span>
     );
   }
-  if (status === "failed") {
+  if (status === "failed" || status === "stalled") {
     return (
       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold border bg-red-50 text-red-600 border-red-200">
         <AlertCircle className="h-3 w-3" />
-        Failed
+        {status === "stalled" ? "Stuck" : "Failed"}
       </span>
     );
   }
@@ -128,11 +137,29 @@ export function DocViewer({
   const [showRight, setShowRight] = useState(true);
   const [doc, setDoc] = useState(document);
   const [retrying, setRetrying] = useState(false);
+  // Set when the API answers 402 because this stage's fee is unpaid. Distinct
+  // from an OpenRouter credits failure, which is a provider problem, not a
+  // client one — conflating the two is the ambiguity this PR removes.
   const [blocked, setBlocked] = useState<PaymentRequiredInfo | null>(null);
+  // Set once the poll cap is hit while the row is still non-terminal. Without
+  // this the viewer spun forever on a row whose worker had died.
+  const [pollExhausted, setPollExhausted] = useState(false);
+  const [creditsModalOpen, setCreditsModalOpen] = useState(false);
 
-  const derived = deriveStatus(doc);
-  const polling = isNonTerminal(doc);
-  const errInfo = describeAiError(doc.generation_error);
+  const nonTerminal = isNonTerminal(doc);
+  const stalled = nonTerminal && pollExhausted;
+  const derived: DerivedStatus = stalled ? "stalled" : deriveStatus(doc);
+  const polling = nonTerminal && !pollExhausted;
+  const errInfo = stalled
+    ? aiErrorInfoForCode("stalled")
+    : describeAiError(doc.generation_error);
+  const showFailurePanel = derived === "failed" || derived === "stalled";
+  const creditsProblem = isCreditsError(doc.generation_error);
+
+  // Admins get the actionable remediation modal; clients get the neutral copy.
+  useEffect(() => {
+    if (isAdmin && creditsProblem) setCreditsModalOpen(true);
+  }, [isAdmin, creditsProblem]);
 
   const handleContentSaved = (newContent: string) => {
     setDoc({ ...doc, content: newContent, version: doc.version + 1 });
@@ -165,10 +192,20 @@ export function DocViewer({
   const latestDocRef = useRef(doc);
   latestDocRef.current = doc;
 
+  // Bounded polling. Terminal state stops it; so does MAX_POLL_ATTEMPTS, after
+  // which we surface a retry affordance instead of hammering the API forever.
   useEffect(() => {
     if (!polling) return;
     const controller = new AbortController();
+    let attempts = 0;
     const interval = setInterval(async () => {
+      attempts += 1;
+      if (attempts > MAX_POLL_ATTEMPTS) {
+        clearInterval(interval);
+        controller.abort();
+        setPollExhausted(true);
+        return;
+      }
       try {
         const res = await fetch(`/api/documents/${doc.id}`, {
           signal: controller.signal,
@@ -184,7 +221,7 @@ export function DocViewer({
         if ((err as Error).name === "AbortError") return;
         console.error("Poll error:", err);
       }
-    }, 3000);
+    }, POLL_INTERVAL_MS);
     return () => {
       clearInterval(interval);
       controller.abort();
@@ -202,6 +239,9 @@ export function DocViewer({
       return;
     }
     setRetrying(true);
+    // Re-arm polling: a retry on a stalled row is exactly the case where we
+    // want to watch it again.
+    setPollExhausted(false);
     setDoc((prev) => ({
       ...prev,
       generation_status: "generating",
@@ -218,33 +258,58 @@ export function DocViewer({
         }),
       });
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          errorCode?: string;
+          redirectUrl?: string;
+        };
+        // Two different things answer 402 here, and conflating them is exactly
+        // the bug this code guards against:
+        //   - the app's own gate, when this stage's fee is unpaid  -> pay CTA
+        //   - OpenRouter, when the provider account is out of credit -> operator fix
+        // The gate is checked first and is identified structurally (it carries a
+        // redirectUrl), never by sniffing "402" out of an error string.
         const gate = paymentRequiredFrom(res, body);
         if (gate) {
           setBlocked(gate);
           setDoc((prev) => ({ ...prev, generation_status: "pending" }));
           return;
         }
-        throw new Error(body.error || "Retry failed");
+        // 409 means a live attempt already holds the claim — keep spinning
+        // rather than flipping the UI to failed.
+        if (res.status === 409) {
+          toast.info(body.error || "Generation is already in progress.");
+          return;
+        }
+        if (body.errorCode === "insufficient_credits" && isAdmin) {
+          setCreditsModalOpen(true);
+        }
+        const err = new Error(body.error || "Retry failed");
+        (err as Error & { errorCode?: string }).errorCode = body.errorCode;
+        throw err;
       }
       setBlocked(null);
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Retry failed"
-      );
+      const errorCode = (err as Error & { errorCode?: string }).errorCode;
+      toast.error(err instanceof Error ? err.message : "Retry failed");
       setDoc((prev) => ({
         ...prev,
         generation_status: "failed",
-        generation_error:
-          err instanceof Error ? err.message : "Retry failed",
+        // Keep the tag so describeAiError classifies the optimistic local
+        // state the same way the persisted row would be.
+        generation_error: errorCode
+          ? `[ai:${errorCode}] ${err instanceof Error ? err.message : "Retry failed"}`
+          : err instanceof Error
+            ? err.message
+            : "Retry failed",
       }));
     } finally {
       setRetrying(false);
     }
-  }, [doc.case_id, doc.id, documentType]);
+  }, [doc.case_id, doc.id, documentType, isAdmin]);
 
   const showPdf = doc.format === "pdf" || doc.type === "uploaded";
-  const downloadDisabled = polling || derived === "failed";
+  const downloadDisabled = polling || showFailurePanel;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-gray-50">
@@ -304,26 +369,42 @@ export function DocViewer({
 
       {/* Content area */}
       <div className="flex-1 flex overflow-hidden">
-        {derived === "failed" ? (
-          <div className="flex-1 flex items-center justify-center p-10">
+        {showFailurePanel ? (
+          <div
+            className="flex-1 flex items-center justify-center p-10"
+            data-testid="doc-failure-panel"
+            data-error-code={errInfo.code}
+          >
             <div className="max-w-md w-full bg-white border border-amber-200 rounded-xl p-6 shadow-sm">
               <div className="flex items-center gap-2 mb-2 text-amber-700">
                 <AlertCircle className="h-5 w-5" />
                 <h3 className="text-base font-semibold">{errInfo.title}</h3>
               </div>
               <p className="text-sm text-gray-600 mb-4">{errInfo.message}</p>
-              <Button
-                onClick={handleRetry}
-                disabled={retrying || !documentType}
-                className="gap-1.5"
-              >
-                {retrying ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <RotateCw className="h-3.5 w-3.5" />
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={handleRetry}
+                  disabled={retrying || !documentType}
+                  className="gap-1.5"
+                  data-testid="doc-retry-button"
+                >
+                  {retrying ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RotateCw className="h-3.5 w-3.5" />
+                  )}
+                  Try again
+                </Button>
+                {isAdmin && errInfo.operatorAction && (
+                  <Button
+                    variant="outline"
+                    onClick={() => setCreditsModalOpen(true)}
+                    data-testid="doc-fix-credits-button"
+                  >
+                    {errInfo.operatorAction.label}
+                  </Button>
                 )}
-                Try again
-              </Button>
+              </div>
               {!documentType && (
                 <p className="text-xs text-gray-400 mt-2">
                   This document can&apos;t be retried automatically — please
@@ -332,7 +413,7 @@ export function DocViewer({
               )}
               {isAdmin && doc.generation_error && (
                 <p className="mt-4 pt-3 border-t border-gray-100 text-[11px] text-gray-400 break-words">
-                  Staff detail: {doc.generation_error}
+                  Staff detail: {stripAiErrorTag(doc.generation_error)}
                 </p>
               )}
             </div>
@@ -363,6 +444,14 @@ export function DocViewer({
 
         {showRight && <DocDetailsPanel document={doc} isAdmin={isAdmin} />}
       </div>
+
+      {isAdmin && (
+        <AiCreditsModal
+          open={creditsModalOpen}
+          onClose={() => setCreditsModalOpen(false)}
+          rawError={stripAiErrorTag(doc.generation_error)}
+        />
+      )}
     </div>
   );
 }

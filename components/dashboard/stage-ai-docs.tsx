@@ -8,6 +8,7 @@ import { PayToGenerateCard } from "@/components/billing/pay-to-generate-card";
 import type { Document } from "@/types";
 import type { StageDocConfig } from "@/lib/stage-config";
 import type { StagePaymentGate } from "@/lib/billing/payment-required";
+import { MAX_POLL_ATTEMPTS, POLL_INTERVAL_MS } from "@/lib/ai-limits";
 import { Lock, FileText, Loader2, AlertCircle, CreditCard } from "lucide-react";
 
 interface StageAiDocsProps {
@@ -86,11 +87,21 @@ export function StageAiDocs({
     !gated &&
     documents.some((d) => d.type === "generated" && isGenerating(d));
 
+  // Bounded refresh loop. This used to refresh every 3s forever, so one
+  // document stuck in 'generating' meant a permanent background poll in every
+  // open tab. Now it gives up after MAX_POLL_ATTEMPTS; the doc viewer's
+  // stalled-state retry (and the cron reaper) take it from there.
   useEffect(() => {
     if (!anyGenerating) return;
+    let ticks = 0;
     const interval = setInterval(() => {
+      ticks += 1;
+      if (ticks > MAX_POLL_ATTEMPTS) {
+        clearInterval(interval);
+        return;
+      }
       router.refresh();
-    }, 3000);
+    }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [anyGenerating, router]);
 

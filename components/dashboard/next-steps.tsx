@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { DocViewer } from "@/components/documents/doc-viewer";
 import { PayToGenerateCard } from "@/components/billing/pay-to-generate-card";
 import { toast } from "sonner";
+import { MAX_POLL_ATTEMPTS, POLL_INTERVAL_MS } from "@/lib/ai-limits";
 import type { Document } from "@/types";
 import type { StagePaymentGate } from "@/lib/billing/payment-required";
 
@@ -118,11 +119,19 @@ export function NextSteps({
   // exactly what stranded clients for weeks.
   const anyGenerating = !gated && documents.some(isGenerating);
 
+  // Bounded refresh loop — see the same note in stage-ai-docs.tsx. An
+  // unreclaimable 'generating' row used to keep this ticking forever.
   useEffect(() => {
     if (!anyGenerating) return;
+    let ticks = 0;
     const interval = setInterval(() => {
+      ticks += 1;
+      if (ticks > MAX_POLL_ATTEMPTS) {
+        clearInterval(interval);
+        return;
+      }
       router.refresh();
-    }, 3000);
+    }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [anyGenerating, router]);
 

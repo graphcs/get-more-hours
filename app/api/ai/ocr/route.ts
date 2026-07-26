@@ -1,6 +1,5 @@
 import { after, NextResponse } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
-import OpenAI from "openai";
 import {
   NAME_MAP,
   STAGE_MAP,
@@ -10,14 +9,18 @@ import {
 import { checkStagePaid } from "@/lib/billing/guard";
 import { ensureStageFeeRow } from "@/lib/billing/stage-payment";
 import { getAiSystemPrompt } from "@/lib/prompts";
+import { extractTextFromImage } from "@/lib/openrouter";
+import { describeAiError } from "@/lib/ai-errors";
 
-const openai = new OpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENROUTER_API_KEY,
-});
-
-const OCR_MODEL =
-  process.env.OPENROUTER_OCR_MODEL || "google/gemini-3.1-flash-lite";
+// This route used to build its own OpenAI client with neither `timeout` nor
+// `maxRetries`, so it silently ran on the SDK defaults (10 min / 2 retries)
+// while generation ran on 90s / 0 retries. Both now share the single
+// configured client in lib/openrouter.ts, budgeted to finish inside
+// maxDuration.
+// NOTE: Next.js requires route segment config to be a static literal, so this
+// cannot reference AI_MAX_DURATION_SECONDS directly — keep the two in sync.
+// 300s is the ceiling on the project's Vercel Pro plan.
+export const maxDuration = 300;
 
 export async function POST(req: Request) {
   const supabase = await createClient();
@@ -40,26 +43,32 @@ export async function POST(req: Request) {
 
   const serviceClient = await createServiceClient();
 
+  // Fetch BEFORE claiming. The old order flipped ocr_status to 'processing'
+  // first, so the "document not found" early-return below left the row
+  // 'processing' forever with no catch to clean it up — and doc-viewer's
+  // isNonTerminal() polled on it indefinitely.
+  const { data: doc, error: docError } = await serviceClient
+    .from("documents")
+    .select("*")
+    .eq("id", documentId)
+    .single();
+
+  if (docError || !doc) {
+    return NextResponse.json({ error: "Document not found" }, { status: 404 });
+  }
+
+  // Claim only once we know the row exists. ocr_started_at lets the reaper
+  // (app/api/cron/reap-stale-jobs) recover this row if the function is killed.
   await serviceClient
     .from("documents")
-    .update({ ocr_status: "processing", ocr_error: null })
+    .update({
+      ocr_status: "processing",
+      ocr_error: null,
+      ocr_started_at: new Date().toISOString(),
+    })
     .eq("id", documentId);
 
   try {
-    // Fetch document
-    const { data: doc, error: docError } = await serviceClient
-      .from("documents")
-      .select("*")
-      .eq("id", documentId)
-      .single();
-
-    if (docError || !doc) {
-      return NextResponse.json(
-        { error: "Document not found" },
-        { status: 404 }
-      );
-    }
-
     if (!doc.storage_path) {
       throw new Error("No file to process");
     }
@@ -83,34 +92,11 @@ export async function POST(req: Request) {
       "ocr_extraction"
     );
 
-    // Send to vision model for OCR
-    const response = await openai.chat.completions.create({
-      model: OCR_MODEL,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: extractionPrompt,
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:${mimeType};base64,${base64}`,
-              },
-            },
-          ],
-        },
-      ],
-      max_tokens: 8000,
+    // Send to vision model for OCR (bounded retries + budget, see openrouter.ts)
+    const ocrText = await extractTextFromImage({
+      prompt: extractionPrompt,
+      dataUrl: `data:${mimeType};base64,${base64}`,
     });
-
-    const ocrText = response.choices[0]?.message?.content;
-
-    if (!ocrText) {
-      throw new Error("OCR failed to extract text");
-    }
 
     // Save OCR text to document
     await serviceClient
@@ -127,14 +113,16 @@ export async function POST(req: Request) {
       textLength: ocrText.length,
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "OCR failed";
+    const raw = err instanceof Error ? err.message : "OCR failed";
     await serviceClient
       .from("documents")
-      .update({ ocr_status: "failed", ocr_error: msg })
+      .update({ ocr_status: "failed", ocr_error: raw })
       .eq("id", documentId);
     console.error("OCR error:", err);
+    // Friendly copy + a machine code so the client can branch (credits modal).
+    const info = describeAiError(raw);
     return NextResponse.json(
-      { error: "OCR processing failed" },
+      { error: info.message, errorCode: info.code, errorTitle: info.title },
       { status: 500 }
     );
   }

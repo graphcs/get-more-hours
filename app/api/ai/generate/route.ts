@@ -1,8 +1,19 @@
 import { NextResponse } from "next/server";
-import { createClient, createServiceClient } from "@/lib/supabase/server";
-import { runDocumentGeneration, type DocumentType, STAGE_MAP } from "@/lib/document-generation";
+import { createClient } from "@/lib/supabase/server";
+import {
+  runDocumentGeneration,
+  type DocumentType,
+  STAGE_MAP,
+} from "@/lib/document-generation";
 import { checkStagePaid } from "@/lib/billing/guard";
-import { friendlyAiError } from "@/lib/ai-errors";
+import { describeAiError } from "@/lib/ai-errors";
+
+// Explicit function limit. lib/openrouter.ts budgets its attempts to finish
+// inside this, so we return a real error instead of being killed mid-claim.
+// NOTE: Next.js requires route segment config to be a static literal, so this
+// cannot reference AI_MAX_DURATION_SECONDS directly — keep the two in sync.
+// 300s is the ceiling on the project's Vercel Pro plan.
+export const maxDuration = 300;
 
 export async function POST(req: Request) {
   const supabase = await createClient();
@@ -35,28 +46,48 @@ export async function POST(req: Request) {
     );
   }
 
+  // NB: a 402 from here is the app's own unpaid-stage gate, NOT an OpenRouter
+  // credits problem. The two are kept apart by `errorCode` below, which is only
+  // ever set from a tagged provider error.
   const gate = await checkStagePaid(supabase, caseId, stage);
   if (!gate.ok) return gate.response;
 
-  // runDocumentGeneration handles generation_status transitions and error capture.
-  await runDocumentGeneration({ caseId, documentType, documentId });
+  const outcome = await runDocumentGeneration({
+    caseId,
+    documentType,
+    documentId,
+  });
 
-  // Check final status to determine HTTP response.
-  const serviceClient = await createServiceClient();
-  const { data: doc } = await serviceClient
-    .from("documents")
-    .select("generation_status, generation_error")
-    .eq("id", documentId)
-    .single();
+  switch (outcome.status) {
+    case "ready":
+    case "already_ready":
+      return NextResponse.json({ message: "Document generated", documentId });
 
-  if (doc?.generation_status === "failed") {
-    // Map the raw provider error to friendly copy — the raw text (which can
-    // include billing/credit details) stays in the DB for staff only.
-    return NextResponse.json(
-      { error: friendlyAiError(doc.generation_error) },
-      { status: 500 }
-    );
+    case "not_found":
+      return NextResponse.json({ error: "Document not found" }, { status: 404 });
+
+    case "in_flight":
+      // Previously this path re-read the row, saw 'generating', and returned
+      // 200 "Document generated" — the user got success plus an eternal
+      // spinner. 409 is the truth: another attempt holds the claim.
+      return NextResponse.json(
+        {
+          error:
+            "This document is already being generated. It should finish shortly — if it doesn't, try again in a few minutes.",
+          errorCode: "in_flight",
+        },
+        { status: 409 }
+      );
+
+    case "failed": {
+      // Map the raw provider error to friendly copy — the raw text (which can
+      // include billing/credit details) stays in the DB for staff only.
+      // `errorCode` lets the client branch (e.g. open the credits modal).
+      const info = describeAiError(outcome.error);
+      return NextResponse.json(
+        { error: info.message, errorCode: info.code, errorTitle: info.title },
+        { status: 500 }
+      );
+    }
   }
-
-  return NextResponse.json({ message: "Document generated", documentId });
 }

@@ -5,21 +5,15 @@ import { Loader2, RefreshCw } from "lucide-react";
 import { SettingsPanel, SettingsRow, StatusPill } from "./settings-panel";
 
 /**
- * Candidate endpoints for the OpenRouter key/credit proxy.
+ * The OpenRouter key/credit proxy.
  *
- * The route itself is owned by a separate branch (the AI/generation work) —
- * this component deliberately does not implement it. We probe the candidates in
- * order and use the first one that answers with JSON, so this page keeps
- * working whether or not that route has landed yet.
- *
- * At merge time this list can be collapsed to the single real path.
+ * This page was built before the route existed, so it probed a list of
+ * candidate paths and used whichever answered. The route has since landed, so
+ * this is now the single real endpoint — kept as an array only so the probe
+ * loop below is unchanged, and deliberately not allowed to accumulate
+ * speculative paths again.
  */
-export const OPENROUTER_HEALTH_ENDPOINTS = [
-  "/api/admin/openrouter",
-  "/api/admin/openrouter/key",
-  "/api/admin/openrouter-key",
-  "/api/admin/ai-health",
-] as const;
+export const OPENROUTER_HEALTH_ENDPOINTS = ["/api/admin/ai-health"] as const;
 
 interface RateLimit {
   requests?: number | null;

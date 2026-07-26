@@ -91,7 +91,11 @@ export async function triggerStageGeneration(
     return;
   }
 
-  const jobs: Promise<void>[] = [];
+  // runDocumentGeneration now reports a GenerationOutcome rather than void, so
+  // the outcome is deliberately discarded here — a document that was already
+  // ready, or is mid-flight under another claim, is not an error for the payment
+  // path. Real failures are recorded on the row itself.
+  const jobs: Promise<unknown>[] = [];
   for (const d of docs || []) {
     const documentType = NAME_TO_TYPE[d.name as string];
     if (!documentType) continue;

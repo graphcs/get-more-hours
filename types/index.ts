@@ -79,8 +79,12 @@ export interface Document {
   version: number;
   generation_status: GenerationStatus | null;
   generation_error: string | null;
+  /** When the current generation claim was taken; drives stale-claim reaping. */
+  generation_started_at?: string | null;
   ocr_status: OcrStatus | null;
   ocr_error: string | null;
+  /** When the current OCR claim was taken; drives stale-claim reaping. */
+  ocr_started_at?: string | null;
   created_at: string;
   updated_at: string;
 }

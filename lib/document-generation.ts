@@ -8,7 +8,21 @@ import {
   buildStage3HearingPrompt,
   buildStage3MemoPrompt,
 } from "@/lib/prompts";
+import { STALE_CLAIM_SECONDS } from "@/lib/ai-limits";
 import type { Case, IntakeData, Document } from "@/types";
+
+/**
+ * Result of one runDocumentGeneration call. Callers that fire-and-forget via
+ * `after()` ignore it; POST /api/ai/generate uses it to pick an HTTP status
+ * instead of blindly re-reading the row and reporting success.
+ */
+export type GenerationOutcome =
+  | { status: "ready"; documentId: string }
+  | { status: "failed"; documentId: string; error: string }
+  /** A live generation already holds the claim. */
+  | { status: "in_flight"; documentId: string }
+  | { status: "already_ready"; documentId: string }
+  | { status: "not_found"; documentId: string };
 
 export type DocumentType =
   | "stage1_request"
@@ -52,28 +66,37 @@ export async function runDocumentGeneration({
   caseId: string;
   documentType: DocumentType;
   documentId: string;
-}): Promise<void> {
+}): Promise<GenerationOutcome> {
   const serviceClient = await createServiceClient();
 
-  // Atomic claim: only proceed if the row was previously pending or failed.
-  // Postgres row-locks per UPDATE, so two concurrent invocations cannot both
-  // pass this filter — one returns 1 row, the other returns 0.
-  const { data: claimed, error: claimErr } = await serviceClient
-    .from("documents")
-    .update({ generation_status: "generating", generation_error: null })
-    .eq("id", documentId)
-    .in("generation_status", ["pending", "failed"])
-    .select("id");
+  // Atomic claim via RPC (migration 017). The claim succeeds when the row is
+  // pending / failed / unset, OR when it is stuck in 'generating' past
+  // STALE_CLAIM_SECONDS — the previous worker is then presumed dead.
+  //
+  // The old code filtered `.in('generation_status', ['pending','failed'])`,
+  // which meant a row whose worker was killed mid-flight (function timeout,
+  // deploy, cold kill) could NEVER be claimed again. The Supabase JS client
+  // can't express the staleness OR-condition in one filter, hence the RPC —
+  // and it must stay one statement so concurrent callers serialise on the
+  // row lock rather than both claiming.
+  const { data: claimed, error: claimErr } = await serviceClient.rpc(
+    "claim_document_generation",
+    { doc_id: documentId, stale_seconds: STALE_CLAIM_SECONDS }
+  );
 
   if (claimErr) {
     console.error("[document-generation] claim failed:", claimErr);
     throw claimErr;
   }
-  if (!claimed || claimed.length === 0) {
-    console.log(
-      `[document-generation] skipping ${documentId} — already generating or ready`
+
+  const claimRows = (claimed ?? []) as { document_id: string; reclaimed: boolean }[];
+  if (claimRows.length === 0) {
+    return describeRefusedClaim(serviceClient, documentId);
+  }
+  if (claimRows[0]?.reclaimed) {
+    console.warn(
+      `[document-generation] reclaimed stale 'generating' row ${documentId}`
     );
-    return;
   }
 
   try {
@@ -189,12 +212,42 @@ export async function runDocumentGeneration({
     // via ensureStageFeeRow() in lib/billing/stage-payment.ts (called from
     // intake, from markStagePaid, and from the OCR stage-advance path), and the
     // amounts come from PRICING in lib/constants.ts.
+
+    return { status: "ready", documentId };
   } catch (err) {
     console.error(`[document-generation] ${documentType} failed:`, err);
-    const msg = err instanceof Error ? err.message : "Generation failed";
+    // AiProviderError messages already carry an `[ai:<code>]` tag; anything
+    // else is stored raw and classified heuristically at the display boundary.
+    const raw = err instanceof Error ? err.message : "Generation failed";
     await serviceClient
       .from("documents")
-      .update({ generation_status: "failed", generation_error: msg })
+      .update({ generation_status: "failed", generation_error: raw })
       .eq("id", documentId);
+    return { status: "failed", documentId, error: raw };
   }
+}
+
+/**
+ * The claim was refused. Distinguish "someone else is actively working on it"
+ * (retry later) from "already finished" (nothing to do) from "gone", so the
+ * API route can return an honest status code instead of a blanket 200.
+ */
+async function describeRefusedClaim(
+  serviceClient: Awaited<ReturnType<typeof createServiceClient>>,
+  documentId: string
+): Promise<GenerationOutcome> {
+  const { data: row } = await serviceClient
+    .from("documents")
+    .select("generation_status")
+    .eq("id", documentId)
+    .maybeSingle();
+
+  if (!row) return { status: "not_found", documentId };
+  if (row.generation_status === "ready") {
+    return { status: "already_ready", documentId };
+  }
+  console.log(
+    `[document-generation] skipping ${documentId} — generation already in flight`
+  );
+  return { status: "in_flight", documentId };
 }
