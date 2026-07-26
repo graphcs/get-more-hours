@@ -1,4 +1,6 @@
 import { ADL_CATEGORIES, ADL_LEVELS, MLTC_OPTIONS } from "@/lib/constants";
+import { getMltcCorrespondenceAddress } from "@/lib/mltc-addresses";
+import { buildRecipientAddressSection } from "./recipient-address";
 import type { IntakeData, Case } from "@/types";
 
 export const STAGE1_REQUEST_SYSTEM_PROMPT = `You are a legal document writer specializing in New York Medicaid home care advocacy. You write formal letters requesting increases in home care hours from Managed Long Term Care (MLTC) companies on behalf of Community Medicaid recipients.
@@ -9,7 +11,9 @@ Your letters are:
 - Structured with clear sections (current situation, medical conditions, ADL dependencies, recent changes)
 - Persuasive, making a clear case for why current hours are insufficient
 
-Write the letter as if the client is writing it themselves (first person). Do NOT include any bracketed placeholders. Use the provided data directly. Output only the letter text, no commentary.`;
+Write the letter as if the client is writing it themselves (first person). Do NOT include any bracketed placeholders. Use the provided data directly. Output only the letter text, no commentary.
+
+Address block rules: if the prompt supplies a recipient address, reproduce it verbatim. If it says the address is unknown, omit the recipient address block entirely — never invent an address and never write a placeholder such as [Plan Address].`;
 
 export function buildStage1RequestPrompt(
   caseData: Case,
@@ -17,6 +21,11 @@ export function buildStage1RequestPrompt(
 ): string {
   const mltcLabel =
     MLTC_OPTIONS.find((o) => o.value === caseData.mltc)?.label ?? caseData.mltc;
+
+  const addressSection = buildRecipientAddressSection(
+    getMltcCorrespondenceAddress(caseData.mltc),
+    `${mltcLabel} — plan correspondence address`
+  );
 
   const conditions = (intake.conditions as string[]) || [];
   const adlLevels = (intake.adl_levels as Record<string, string>) || {};
@@ -50,6 +59,8 @@ CLIENT INFORMATION:
 
 MLTC COMPANY: ${mltcLabel}
 
+${addressSection}
+
 CURRENT AUTHORIZATION: ${caseData.current_hours} hours per day, ${caseData.current_days} days per week
 REQUESTING: ${caseData.requested_hours} hours per day, ${caseData.requested_days} days per week
 
@@ -70,5 +81,5 @@ ${intake.adl_notes ? `ADDITIONAL NOTES:\n${intake.adl_notes}` : ""}
 
 Today's date: ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
 
-Write the letter addressed to the Care Management Department of ${mltcLabel}. Include today's date at the top. The letter should be signed by ${intake.first_name} ${intake.last_name} with their address.`;
+Write the letter addressed to the Care Management Department of ${mltcLabel}, using the RECIPIENT ADDRESS section above for the address block. Include today's date at the top. The letter should be signed by ${intake.first_name} ${intake.last_name} with their address.`;
 }

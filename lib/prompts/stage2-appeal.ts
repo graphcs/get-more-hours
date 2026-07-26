@@ -1,4 +1,6 @@
 import { MLTC_OPTIONS } from "@/lib/constants";
+import { getMltcAppealsAddress } from "@/lib/mltc-addresses";
+import { buildRecipientAddressSection } from "./recipient-address";
 import type { IntakeData, Case } from "@/types";
 
 export const STAGE2_APPEAL_SYSTEM_PROMPT = `You are a legal document writer specializing in New York Medicaid home care advocacy. You write Internal Appeal letters challenging Initial Adverse Determinations (IADs) issued by Managed Long Term Care (MLTC) companies.
@@ -12,7 +14,9 @@ Your appeal letters:
 - Reference applicable NY state regulations where appropriate
 - Written from the client's perspective (first person)
 
-Output only the letter text, no commentary.`;
+Output only the letter text, no commentary.
+
+Address block rules: if the prompt supplies a recipient address, reproduce it verbatim. If it says the address is unknown, omit the recipient address block entirely — never invent an address and never write a placeholder such as [Plan Address].`;
 
 export function buildStage2AppealPrompt(
   caseData: Case,
@@ -23,6 +27,11 @@ export function buildStage2AppealPrompt(
   const mltcLabel =
     MLTC_OPTIONS.find((o) => o.value === caseData.mltc)?.label ?? caseData.mltc;
 
+  const addressSection = buildRecipientAddressSection(
+    getMltcAppealsAddress(caseData.mltc),
+    `${mltcLabel} — appeals department address`
+  );
+
   const conditions = (intake.conditions as string[]) || [];
 
   return `Write a formal Internal Appeal letter challenging the following Initial Adverse Determination.
@@ -32,6 +41,9 @@ CLIENT INFORMATION:
 - Address: ${intake.address}, ${intake.city}, ${intake.state} ${intake.zip}
 
 MLTC COMPANY: ${mltcLabel}
+
+${addressSection}
+
 CURRENT AUTHORIZATION: ${caseData.current_hours} hours per day, ${caseData.current_days} days per week
 REQUESTED: ${caseData.requested_hours} hours per day, ${caseData.requested_days} days per week
 
@@ -50,5 +62,5 @@ ${lomnText ? `--- LETTER OF MEDICAL NECESSITY TEXT ---\n${lomnText}\n--- END LOM
 
 Today's date: ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
 
-Write the appeal letter addressed to the Appeals Department of ${mltcLabel}. For each reason cited in the IAD for denial, provide a specific counter-argument referencing the client's medical conditions, functional limitations, and medical evidence. The letter should be signed by ${intake.first_name} ${intake.last_name}.`;
+Write the appeal letter addressed to the Appeals Department of ${mltcLabel}, using the RECIPIENT ADDRESS section above for the address block. For each reason cited in the IAD for denial, provide a specific counter-argument referencing the client's medical conditions, functional limitations, and medical evidence. The letter should be signed by ${intake.first_name} ${intake.last_name}.`;
 }

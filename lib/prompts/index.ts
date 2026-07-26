@@ -26,6 +26,11 @@ export {
 export { OCR_EXTRACTION_PROMPT } from "./ocr";
 
 export {
+  NO_ADDRESS_INSTRUCTION,
+  buildRecipientAddressSection,
+} from "./recipient-address";
+
+export {
   PROMPT_CONFIGS,
   PROMPT_KEYS,
   getPromptConfig,
