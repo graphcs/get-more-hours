@@ -68,8 +68,12 @@ function routeMatches(pattern: string, href: string): boolean {
 const navItems = parseNavItems();
 const routes = collectRoutes();
 
-/** These hrefs have no page file today. See the `.skip` block at the bottom. */
-const KNOWN_MISSING = new Set(["/admin/settings"]);
+/**
+ * Hrefs that are knowingly unbacked by a page file. Empty, and it should stay
+ * that way: a nav item pointing at a missing route is a production 404, which
+ * is exactly what happened with `/admin/settings`.
+ */
+const KNOWN_MISSING = new Set<string>();
 
 describe("admin sidebar nav", () => {
   it("parses all five nav items from admin-nav.tsx", () => {
@@ -108,36 +112,27 @@ describe("admin sidebar nav", () => {
   );
 });
 
-// ── KNOWN FAILURE — fixed in PR 5 ────────────────────────────────────────────
-// `/admin/settings` is listed in the admin sidebar but no page file exists for
-// it, so clicking "Settings" in production returns a 404. This is the reported
-// bug. PR 5 adds app/(admin)/admin/settings/page.tsx; when it lands, delete the
-// KNOWN_MISSING entry above and change `.skip` to a plain `describe` so the
-// route is covered by the parameterised block instead.
-//
-// Do not delete this block — it is the regression test for the fix.
-describe.skip("KNOWN BUG (fixed in PR 5): every nav href resolves", () => {
-  it.each([...KNOWN_MISSING].map((href) => [href] as const))(
+// ── Regression tests for the reported production 404s ────────────────────────
+// "Settings" was listed in the admin sidebar with no page file behind it, so
+// clicking it returned a 404. `/admin/clients` had the same problem, reachable
+// from the dashboard's client rows. Both now have pages; these assertions keep
+// them from regressing.
+describe("previously-404ing admin routes", () => {
+  it.each([["/admin/settings"], ["/admin/clients"]])(
     "%s resolves to a page under app/",
     (href) => {
       expect(
         routes.some((r) => routeMatches(r, href)),
-        `No page file under app/ serves ${href} — this is the production 404.`
+        `No page file under app/ serves ${href} — this was the production 404.`
       ).toBe(true);
     }
   );
 });
 
-// Guard against the skip above going stale: if PR 5 lands the page but nobody
-// un-skips, this test fails and points at the cleanup.
+// Guard against KNOWN_MISSING quietly refilling: anything added to it must be a
+// deliberate, temporary decision, and this states the intent is for it to be empty.
 describe("KNOWN_MISSING bookkeeping", () => {
-  it.each([...KNOWN_MISSING])(
-    "%s is still genuinely missing (un-skip the block above once it exists)",
-    (href) => {
-      expect(
-        routes.some((r) => routeMatches(r, href)),
-        `${href} now has a page file — remove it from KNOWN_MISSING and un-skip the PR 5 block.`
-      ).toBe(false);
-    }
-  );
+  it("is empty — every nav href should resolve", () => {
+    expect([...KNOWN_MISSING]).toEqual([]);
+  });
 });
