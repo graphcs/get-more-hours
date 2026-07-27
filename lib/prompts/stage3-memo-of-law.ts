@@ -1,4 +1,4 @@
-import { ADL_CATEGORIES, ADL_LEVELS, MLTC_OPTIONS } from "@/lib/constants";
+import { ADL_CATEGORIES, ADL_LEVELS, getMltcLabel } from "@/lib/constants";
 import type { IntakeData, Case } from "@/types";
 
 export const STAGE3_MEMO_SYSTEM_PROMPT = `You are a legal document writer specializing in New York Medicaid home care advocacy. You write Memoranda of Law for Fair Hearings before NYS Administrative Law Judges.
@@ -24,8 +24,7 @@ export function buildStage3MemoPrompt(
   uasText: string,
   lomnText?: string
 ): string {
-  const mltcLabel =
-    MLTC_OPTIONS.find((o) => o.value === caseData.mltc)?.label ?? caseData.mltc;
+  const mltcLabel = getMltcLabel(caseData.mltc);
 
   const conditions = (intake.conditions as string[]) || [];
   const adlLevels = (intake.adl_levels as Record<string, string>) || {};

@@ -14,7 +14,8 @@ import {
 import { DocViewer } from "@/components/documents/doc-viewer";
 import {
   BILLING_STATUS_MAP,
-  MLTC_OPTIONS,
+  getMltcLabel,
+  getMltcRetirement,
   STAGE_LABELS,
   STATUS_MAP,
 } from "@/lib/constants";
@@ -69,8 +70,10 @@ export function ClientDetail({
   const [compingStage, setCompingStage] = useState<number | null>(null);
   const [resetting, setResetting] = useState(false);
 
-  const mltcLabel =
-    MLTC_OPTIONS.find((o) => o.value === caseData.mltc)?.label ?? caseData.mltc;
+  const mltcLabel = getMltcLabel(caseData.mltc);
+  // Old cases can still point at a plan that has since closed — we never
+  // rewrite `cases.mltc`. Say so, so staff know why there is no plan address.
+  const mltcRetirement = getMltcRetirement(caseData.mltc);
   const sm = STATUS_MAP[stageStatus] ?? STATUS_MAP.pending;
   const conditions = (intake?.conditions as string[]) || [];
   const canAdvance = caseData.current_stage < 3;
@@ -416,6 +419,18 @@ export function ClientDetail({
               <div>
                 <span className="text-gray-500">MLTC:</span>{" "}
                 <span className="font-medium">{mltcLabel}</span>
+                {mltcRetirement && (
+                  <span
+                    className="ml-1.5 align-middle inline-block rounded px-1.5 py-0.5 text-[11px] font-medium bg-amber-50 text-amber-800 border border-amber-200"
+                    title={`${mltcRetirement.reason}${
+                      mltcRetirement.date
+                        ? ` (closed ${mltcRetirement.date})`
+                        : ""
+                    }`}
+                  >
+                    Plan closed
+                  </span>
+                )}
               </div>
               <div>
                 <span className="text-gray-500">Hours:</span>{" "}

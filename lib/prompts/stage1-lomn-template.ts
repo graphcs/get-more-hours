@@ -1,4 +1,4 @@
-import { MLTC_OPTIONS } from "@/lib/constants";
+import { getMltcLabel } from "@/lib/constants";
 import type { IntakeData, Case } from "@/types";
 
 export const STAGE1_LOMN_SYSTEM_PROMPT = `You are a legal document writer specializing in New York Medicaid home care advocacy. You create Letter of Medical Necessity (LOMN) request templates that patients send to their doctors, asking them to write an LOMN supporting a request for more home care hours.
@@ -16,8 +16,7 @@ export function buildStage1LomnPrompt(
   caseData: Case,
   intake: IntakeData
 ): string {
-  const mltcLabel =
-    MLTC_OPTIONS.find((o) => o.value === caseData.mltc)?.label ?? caseData.mltc;
+  const mltcLabel = getMltcLabel(caseData.mltc);
 
   const conditions = (intake.conditions as string[]) || [];
 

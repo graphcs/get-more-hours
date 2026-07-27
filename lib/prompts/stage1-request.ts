@@ -1,4 +1,4 @@
-import { ADL_CATEGORIES, ADL_LEVELS, MLTC_OPTIONS } from "@/lib/constants";
+import { ADL_CATEGORIES, ADL_LEVELS, getMltcLabel } from "@/lib/constants";
 import { getMltcCorrespondenceAddress } from "@/lib/mltc-addresses";
 import { buildRecipientAddressSection } from "./recipient-address";
 import type { IntakeData, Case } from "@/types";
@@ -19,8 +19,7 @@ export function buildStage1RequestPrompt(
   caseData: Case,
   intake: IntakeData
 ): string {
-  const mltcLabel =
-    MLTC_OPTIONS.find((o) => o.value === caseData.mltc)?.label ?? caseData.mltc;
+  const mltcLabel = getMltcLabel(caseData.mltc);
 
   const addressSection = buildRecipientAddressSection(
     getMltcCorrespondenceAddress(caseData.mltc),

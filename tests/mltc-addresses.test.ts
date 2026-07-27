@@ -1,5 +1,12 @@
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { MLTC_OPTIONS } from "@/lib/constants";
+import {
+  MLTC_OPTIONS,
+  MLTC_PLANS,
+  getMltcLabel,
+  getMltcRetirement,
+} from "@/lib/constants";
 import {
   MLTC_PLAN_CONTACTS,
   formatMltcAddress,
@@ -13,7 +20,11 @@ import { buildStage1RequestPrompt } from "@/lib/prompts/stage1-request";
 import { buildStage2AppealPrompt } from "@/lib/prompts/stage2-appeal";
 import type { Case, IntakeData } from "@/types";
 
-const PLAN_VALUES = MLTC_OPTIONS.map((o) => o.value);
+/** Every value that can be stored in `cases.mltc`, retired plans included. */
+const PLAN_VALUES = MLTC_PLANS.map((p) => p.value);
+
+/** Only the plans a new intake may choose. */
+const SELECTABLE_VALUES = MLTC_OPTIONS.map((o) => o.value);
 
 // Plans we deliberately left unverified. Keeping this list in the test means
 // adding an address (or removing a plan) forces the list to be updated, so a
@@ -24,6 +35,30 @@ const KNOWN_UNKNOWN: MltcPlanValue[] = [
   "unitedhealth",
   "wellcare",
   "other",
+];
+
+// Plans taken off the intake form because they no longer operate. Listing them
+// here means retiring (or un-retiring) a plan is a deliberate edit.
+const RETIRED_VALUES: MltcPlanValue[] = [
+  "guildnet",
+  "independence",
+  "unitedhealth",
+  "wellcare",
+];
+
+// Real `cases.mltc` values observed in production, including the ones that
+// point at plans which have since closed. Every one of these must still
+// resolve to a human-readable label — we never rewrite these rows.
+const PRODUCTION_MLTC_VALUES = [
+  "aetna",
+  "centerlight",
+  "elderplan",
+  "fidelis",
+  "guildnet",
+  "healthfirst",
+  "molina",
+  "unitedhealth",
+  "vnsny",
 ];
 
 function makeCase(mltc: string): Case {
@@ -66,7 +101,7 @@ const intake: IntakeData = {
 };
 
 describe("MLTC address lookup", () => {
-  it("has an entry for every MLTC option the intake offers", () => {
+  it("has an entry for every plan, selectable or retired", () => {
     for (const value of PLAN_VALUES) {
       expect(
         Object.prototype.hasOwnProperty.call(MLTC_PLAN_CONTACTS, value),
@@ -75,7 +110,7 @@ describe("MLTC address lookup", () => {
     }
   });
 
-  it("has no entries for plans the intake does not offer", () => {
+  it("has no entries for plans that are not in MLTC_PLANS", () => {
     for (const key of Object.keys(MLTC_PLAN_CONTACTS)) {
       expect(PLAN_VALUES as readonly string[]).toContain(key);
     }
@@ -189,5 +224,104 @@ describe("prompt builders and the recipient address block", () => {
         expect(brackets.every((b) => b === "[Plan Address]")).toBe(true);
       }
     }
+  });
+});
+
+describe("selectable plans vs. resolvable plans", () => {
+  it("resolves every MLTC value seen in production to a non-empty label", () => {
+    for (const value of PRODUCTION_MLTC_VALUES) {
+      const label = getMltcLabel(value);
+      expect(label.trim(), `"${value}" resolved to an empty label`).not.toBe("");
+      // A raw slug leaking into the UI is the exact failure we are guarding
+      // against, so the label must differ from the stored value.
+      expect(label, `"${value}" resolved to its own raw value`).not.toBe(value);
+    }
+  });
+
+  it("still labels retired plans, which live cases point at", () => {
+    for (const value of RETIRED_VALUES) {
+      expect(PLAN_VALUES as readonly string[]).toContain(value);
+      expect(getMltcLabel(value).trim()).not.toBe("");
+    }
+  });
+
+  it("falls back to the raw value for a plan it has never heard of", () => {
+    expect(getMltcLabel("some_plan_from_2011")).toBe("some_plan_from_2011");
+    expect(getMltcLabel("")).toBe("");
+  });
+
+  it("offers no retired plan on the intake form", () => {
+    for (const value of RETIRED_VALUES) {
+      expect(
+        SELECTABLE_VALUES,
+        `"${value}" is retired but still selectable on the intake form`
+      ).not.toContain(value);
+    }
+  });
+
+  it("marks every retired plan with a reason, and a date when we have one", () => {
+    for (const value of RETIRED_VALUES) {
+      const retirement = getMltcRetirement(value);
+      expect(retirement, `"${value}" has no retirement record`).not.toBeNull();
+      expect(retirement!.reason.trim()).not.toBe("");
+      // `date` is null when no source establishes one — never a guess.
+      if (retirement!.date !== null) {
+        expect(retirement!.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      }
+    }
+    expect(getMltcRetirement("unitedhealth")?.date).toBe("2019-09-01");
+  });
+
+  it("reports no retirement for a plan that still runs", () => {
+    for (const value of SELECTABLE_VALUES) {
+      expect(getMltcRetirement(value)).toBeNull();
+    }
+  });
+
+  it("gives every selectable plan a verified address or an explicit unknown", () => {
+    for (const value of SELECTABLE_VALUES) {
+      expect(
+        Object.prototype.hasOwnProperty.call(MLTC_PLAN_CONTACTS, value),
+        `"${value}" is selectable but has no entry in MLTC_PLAN_CONTACTS`
+      ).toBe(true);
+
+      const contacts = MLTC_PLAN_CONTACTS[value as MltcPlanValue];
+      if (contacts === null) {
+        // Deliberately unknown is fine, but it must be a recorded decision.
+        expect(KNOWN_UNKNOWN as readonly string[]).toContain(value);
+      } else {
+        expect(contacts.correspondence.lines.length).toBeGreaterThan(1);
+      }
+    }
+  });
+});
+
+describe("MLTC_OPTIONS is never used to look up a label", () => {
+  // MLTC_OPTIONS deliberately excludes retired plans, so using it to label a
+  // stored `cases.mltc` value silently blanks out historical cases. That is the
+  // bug this module exists to prevent; getMltcLabel() is the only correct path.
+  const ROOTS = ["app", "components", "lib"];
+
+  function sourceFiles(dir: string): string[] {
+    const out: string[] = [];
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) {
+        out.push(...sourceFiles(full));
+      } else if (/\.tsx?$/.test(entry)) {
+        out.push(full);
+      }
+    }
+    return out;
+  }
+
+  it("has no MLTC_OPTIONS.find(...) anywhere in the app source", () => {
+    const offenders = ROOTS.flatMap(sourceFiles).filter((file) =>
+      /MLTC_OPTIONS\s*\.\s*find/.test(readFileSync(file, "utf8"))
+    );
+    expect(
+      offenders,
+      "Use getMltcLabel(value) instead — MLTC_OPTIONS omits retired plans."
+    ).toEqual([]);
   });
 });

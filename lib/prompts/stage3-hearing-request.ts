@@ -1,4 +1,4 @@
-import { MLTC_OPTIONS } from "@/lib/constants";
+import { getMltcLabel } from "@/lib/constants";
 import type { IntakeData, Case } from "@/types";
 
 export const STAGE3_HEARING_SYSTEM_PROMPT = `You are a legal document writer specializing in New York Medicaid home care advocacy. You write Fair Hearing requests to the New York State Office of Temporary and Disability Assistance (OTDA).
@@ -18,8 +18,7 @@ export function buildStage3HearingPrompt(
   intake: IntakeData,
   fadText: string
 ): string {
-  const mltcLabel =
-    MLTC_OPTIONS.find((o) => o.value === caseData.mltc)?.label ?? caseData.mltc;
+  const mltcLabel = getMltcLabel(caseData.mltc);
 
   return `Write a formal Fair Hearing request to the New York State Office of Temporary and Disability Assistance (OTDA).
 

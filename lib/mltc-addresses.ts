@@ -1,7 +1,7 @@
-import { MLTC_OPTIONS } from "@/lib/constants";
+import type { MltcPlanValue } from "@/lib/constants";
 
 /**
- * Mailing addresses for the MLTC plans offered on the intake form.
+ * Mailing addresses for every MLTC plan in `MLTC_PLANS`, selectable or retired.
  *
  * These addresses end up on formal legal correspondence sent by vulnerable
  * clients, so the rule for this file is: only record an address that has been
@@ -15,7 +15,7 @@ import { MLTC_OPTIONS } from "@/lib/constants";
  * can be re-verified. Plans move; re-check anything older than ~12 months.
  */
 
-export type MltcPlanValue = (typeof MLTC_OPTIONS)[number]["value"];
+export type { MltcPlanValue };
 
 export interface MltcAddress {
   /** Recipient block, one line per output line, ready to print on a letter. */
@@ -38,8 +38,9 @@ export interface MltcPlanContacts {
 }
 
 /**
- * Keyed on the exact `value`s in `MLTC_OPTIONS` so a new intake option cannot
- * be added without a decision being recorded here (see the unit tests).
+ * Keyed on the exact `value`s in `MLTC_PLANS` so a new plan cannot be added
+ * without a decision being recorded here (see the unit tests). Retired plans
+ * are keyed too — a historical case still needs a lookup that resolves.
  * `null` means "deliberately unknown" — the reason is in the comment above it.
  */
 export const MLTC_PLAN_CONTACTS: Record<MltcPlanValue, MltcPlanContacts | null> =
@@ -77,6 +78,37 @@ export const MLTC_PLAN_CONTACTS: Record<MltcPlanValue, MltcPlanContacts | null> 
       },
     },
 
+    // Anthem Blue Cross and Blue Shield HP — the "Anthem BCBS HealthPlus MLTC"
+    // plan in the NYS DOH consumer guides (pub. 3339/3340/3341, rev. 10/25).
+    // Service authorization requests go to Care Management; appeals go to
+    // Appeals and Grievances at the same street address (that is what the
+    // handbook prints — the attention line is the only difference).
+    // Source: Member Handbook — Managed Long-Term Care Program,
+    //   form 1050124NYMMLABS 05/25, "Requesting Service Authorization" and
+    //   "How do I Contact my Plan to file an Appeal?"
+    //   https://www.anthembluecross.com/content/dam/digital/docs/anthembluecross/medicaid/new-york/member-handbook-managed-long-term-care-english.pdf
+    //   (linked from https://www.anthembluecross.com/ny/medicaid/managed-long-term-care)
+    // Checked: 2026-07-26.
+    anthem: {
+      correspondence: {
+        lines: [
+          "Anthem Blue Cross and Blue Shield HP",
+          "Care Management",
+          "1985 Marcus Ave., Ste. 150",
+          "Lake Success, NY 11042",
+        ],
+      },
+      appeals: {
+        lines: [
+          "Anthem Blue Cross and Blue Shield HP",
+          "Appeals and Grievances",
+          "1985 Marcus Ave., Ste. 150",
+          "Lake Success, NY 11042",
+        ],
+        fax: "718-368-6267",
+      },
+    },
+
     // CenterLight Healthcare — note this is now a PACE plan, not an MLTC
     // partial-capitation plan (NYS DOH pub. 3339 rev. 10/25 lists CenterLight
     // only under PACE). The address below is the one CenterLight publishes for
@@ -91,6 +123,41 @@ export const MLTC_PLAN_CONTACTS: Record<MltcPlanValue, MltcPlanContacts | null> 
           "625 RXR Plaza, Ste 1350",
           "Uniondale, NY 11556",
         ],
+      },
+    },
+
+    // Centers Plan for Healthy Living MLTC.
+    // NOTE ON THE CORRESPONDENCE ADDRESS: the MLTC handbook routes service
+    // authorization requests through the member's Care Management Team by phone
+    // and prints NO utilization-management mailing address. The address below is
+    // the handbook's own inside-cover Member Services address ("If you have
+    // questions or need help, please write to us at:") — the only member-
+    // correspondence address the MLTC handbook publishes. We did NOT reuse the
+    // "Attn: Utilization Management" address from centersplan.com's um_quick_link
+    // PDF: that document is a Medicare Advantage one and its routing is
+    // unverified for the MLTC line of business.
+    // Appeals address is printed twice in the handbook (Section 14 and "How do I
+    // Contact my Plan to file an Appeal?"), spelled exactly as reproduced here.
+    // Source: Managed Long Term Care Member Handbook, CPHL_MK006_01302017,
+    //   rev. 02/2025
+    //   https://centersplan.com/wp-content/uploads/2025/06/cph_mltc_mhb_e25_156259_2025_mltc_member_handbook_en_042325_proof.pdf
+    // Checked: 2026-07-26.
+    centers_plan: {
+      correspondence: {
+        lines: [
+          "Centers Plan for Healthy Living",
+          "75 Vanderbilt Ave, Suite 700",
+          "Staten Island, NY 10304",
+        ],
+      },
+      appeals: {
+        lines: [
+          "Centers Plan for Healthy Living",
+          "Attention: Grievances and Appeals Department",
+          "75 Vanderbilt Ave. Suite 700",
+          "Staten Island, NY 10304",
+        ],
+        fax: "1-347-505-7089",
       },
     },
 
@@ -133,6 +200,28 @@ export const MLTC_PLAN_CONTACTS: Record<MltcPlanValue, MltcPlanContacts | null> 
       },
     },
 
+    // Hamaspik Choice, Inc. MLTC. The handbook sends BOTH written service
+    // authorization requests and written plan appeals to Utilization Management,
+    // so there is no separate appeals block. (A distinct "Attention: Grievances"
+    // line exists, but only for complaints/grievances, which is a different
+    // process from an appeal of an action.)
+    // Source: MLTC Member Handbook (English), "Service Authorizations, Actions,
+    //   and Appeals" and "How do I Contact my Plan to file an Appeal?"
+    //   https://www.hamaspik.com/hubfs/MLTC%20Member%20handbook%20march%202024-1.pdf
+    //   (linked from https://www.hamaspik.com/members/mltc; hamaspikchoice.org
+    //   redirects to hamaspik.com)
+    // Checked: 2026-07-26.
+    hamaspik: {
+      correspondence: {
+        lines: [
+          "Hamaspik Choice",
+          "Attention: Utilization Management",
+          "775 N. Main St.",
+          "Spring Valley, NY 10977",
+        ],
+      },
+    },
+
     // Healthfirst — the MLTC product is Senior Health Partners. Requests to
     // increase current services (concurrent review) go to Utilization
     // Management; appeals go to Appeals and Grievances.
@@ -159,6 +248,37 @@ export const MLTC_PLAN_CONTACTS: Record<MltcPlanValue, MltcPlanContacts | null> 
       },
     },
 
+    // MetroPlusHealth MLTC. Service authorization requests go to Prior
+    // Authorization; appeals go to the Appeals Coordinator at the same address.
+    // The handbook writes the correspondence city line as "New York, New York
+    // 10004"; we print the two-letter state as the handbook itself does in the
+    // appeals paragraph ("50 Water St., New York, NY 10004").
+    // Source: MetroPlusHEALTH Managed Long Term Care Member Handbook,
+    //   MBR 23.133 (Feb 2024), "Service Authorizations, Actions, and Action
+    //   Appeals" and "How do I Contact my Plan to File an Appeal?"
+    //   https://metroplus.org/wp-content/uploads/2023/11/MBR-23.133-MLTC-Member-Handbook_FINAL_021424_complete.pdf
+    //   (linked from https://metroplus.org/mltc/)
+    // Checked: 2026-07-26.
+    metroplus: {
+      correspondence: {
+        lines: [
+          "MetroPlusHealth",
+          "Attention: Prior Authorization",
+          "50 Water Street",
+          "New York, NY 10004",
+        ],
+        fax: "212-908-5282",
+      },
+      appeals: {
+        lines: [
+          "MetroPlusHealth",
+          "Appeals Coordinator",
+          "50 Water St.",
+          "New York, NY 10004",
+        ],
+      },
+    },
+
     // Molina Healthcare's New York MLTC plan is Senior Whole Health of New
     // York. The handbook gives one address for service authorization requests,
     // complaints and appeals.
@@ -176,6 +296,37 @@ export const MLTC_PLAN_CONTACTS: Record<MltcPlanValue, MltcPlanContacts | null> 
       },
     },
 
+    // ElderServe at Home — the plan NYS DOH still lists as "RiverSpring at
+    // Home" (riverspringathome.org 301-redirects to elderserveathome.org; same
+    // entity, ElderServe Health, Inc., same 1-800-370-3600 line, same street).
+    // NOTE: prior authorization is normally handled by the member's Care
+    // Manager by phone; the "Service Authorizations" mailing address below is
+    // the one the handbook prints in that section for written service
+    // authorization correspondence.
+    // Source: ElderServe at Home Managed Long Term Care Program Member
+    //   Handbook, 2026 Edition
+    //   https://elderserveathome.org/wp-content/uploads/2025/12/2026-MLTC-Member-Handbook_EN-Finalv2.pdf
+    //   (linked from https://elderserveathome.org/members/member-materials/)
+    // Checked: 2026-07-26.
+    riverspring: {
+      correspondence: {
+        lines: [
+          "ElderServe at Home",
+          "Service Authorizations",
+          "80 West 225th St.",
+          "Bronx, NY 10463",
+        ],
+      },
+      appeals: {
+        lines: [
+          "ElderServe at Home",
+          "Attn: Quality Department",
+          "80 West 225th Street",
+          "Bronx, NY 10463",
+        ],
+      },
+    },
+
     // Same plan as `molina` above — the intake offers both labels. Verified
     // from the same 2025 Senior Whole Health of New York MLTC Member Handbook.
     // Checked: 2026-07-26.
@@ -186,6 +337,38 @@ export const MLTC_PLAN_CONTACTS: Record<MltcPlanValue, MltcPlanContacts | null> 
           "15 MetroTech Center, 11th Floor",
           "Brooklyn, NY 11201",
         ],
+      },
+    },
+
+    // VillageCareMAX MLTC.
+    // IMPORTANT: the plan moved offices and its handbook body text is stale —
+    // the 2026 handbook PDF still says "112 Charles St, New York, NY 10014",
+    // while the plan's own current member-facing pages (and the Notice of
+    // Non-Discrimination bound into that same PDF) give 120 Broadway. We use
+    // the current pages. Re-check if the handbook body is ever reissued.
+    // Sources (both first-party, both more recently updated than the handbook
+    //   body): https://www.villagecaremax.org/contact-us ("Mailing Address",
+    //   page last updated 05/01/2026) for correspondence;
+    //   https://www.villagecaremax.org/mltc/members ("To file a complaint or to
+    //   appeal a plan action ... Or write to:", page last updated 06/23/2026)
+    //   for appeals.
+    // Checked: 2026-07-26.
+    villagecaremax: {
+      correspondence: {
+        lines: [
+          "VillageCareMAX",
+          "120 Broadway, Suite 2840",
+          "New York, NY 10271",
+        ],
+      },
+      appeals: {
+        lines: [
+          "VillageCareMAX",
+          "Quality Assurance Department",
+          "120 Broadway, Suite 2840",
+          "New York, NY 10271",
+        ],
+        fax: "1-347-226-5180",
       },
     },
 

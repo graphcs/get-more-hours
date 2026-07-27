@@ -1,4 +1,4 @@
-import { MLTC_OPTIONS } from "@/lib/constants";
+import { getMltcLabel } from "@/lib/constants";
 import type { Case } from "@/types";
 
 interface CaseSummaryProps {
@@ -6,8 +6,7 @@ interface CaseSummaryProps {
 }
 
 export function CaseSummary({ caseData }: CaseSummaryProps) {
-  const mltcLabel =
-    MLTC_OPTIONS.find((o) => o.value === caseData.mltc)?.label ?? caseData.mltc;
+  const mltcLabel = getMltcLabel(caseData.mltc);
 
   const hoursDiff = caseData.requested_hours - caseData.current_hours;
   const progressPct = Math.round(

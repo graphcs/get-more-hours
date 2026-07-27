@@ -1,6 +1,6 @@
 "use client";
 
-import { ADL_CATEGORIES, ADL_LEVELS, MLTC_OPTIONS } from "@/lib/constants";
+import { ADL_CATEGORIES, ADL_LEVELS, getMltcLabel } from "@/lib/constants";
 import type { IntakeFormData } from "@/types";
 
 interface StepProps {
@@ -109,10 +109,7 @@ export function StepReview({ data }: StepProps) {
         <Row
           label="MLTC"
           value={
-            data.mltc
-              ? MLTC_OPTIONS.find((o) => o.value === data.mltc)?.label ??
-                data.mltc
-              : null
+            data.mltc ? getMltcLabel(data.mltc) : null
           }
         />
         <Row

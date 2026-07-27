@@ -1,4 +1,4 @@
-import { MLTC_OPTIONS } from "@/lib/constants";
+import { getMltcLabel } from "@/lib/constants";
 import { getMltcAppealsAddress } from "@/lib/mltc-addresses";
 import { buildRecipientAddressSection } from "./recipient-address";
 import type { IntakeData, Case } from "@/types";
@@ -24,8 +24,7 @@ export function buildStage2AppealPrompt(
   iadText: string,
   lomnText?: string
 ): string {
-  const mltcLabel =
-    MLTC_OPTIONS.find((o) => o.value === caseData.mltc)?.label ?? caseData.mltc;
+  const mltcLabel = getMltcLabel(caseData.mltc);
 
   const addressSection = buildRecipientAddressSection(
     getMltcAppealsAddress(caseData.mltc),
